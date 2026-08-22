@@ -21,7 +21,7 @@ function resolvedGasUrl_(){
   try{
     if(typeof GAS_WEB_APP_URL === 'string'){
       const u = GAS_WEB_APP_URL.trim();
-      if(u && u.indexOf('https://script.google.com/macros/s/AKfycbyfkFlv1NLXIDIAFQ4wnz2GobcmMeg26-V3byOLud5p0-Mkm8egpqOGF257EUa2hReD/exec') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
+      if(u && u.indexOf('https://script.google.com/macros/s/AKfycbxU-L0sJ11gBpgihx6-KjWQVYCKdrepxDooSmHRwbafZ_-HS5Z7TJ-lyt5akGjmqbVv/exec') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
         return u;
       }
     }
