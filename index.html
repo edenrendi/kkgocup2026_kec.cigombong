@@ -1,0 +1,342 @@
+
+<!--
+UPDATE 2026
+- Team otomatis mengikuti nama Gugus yang dipilih admin.
+- Team A/B/C hanya slot penempatan.
+- Turnamen menggunakan sistem gugur (knockout), bukan Sistem Gugur (Knockout)/Sistem Gugur (Knockout).
+- Tampilan Team menampilkan Gugus, Kategori, dan Daftar Pemain.
+-->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BADMINTIME | Tournament Management System</title>
+<meta name="description" content="Sistem manajemen turnamen badminton — pendaftaran, jadwal, bagan, dan skor pertandingan.">
+<meta property="og:title" content="BADMINTIME | Tournament Management System">
+<meta property="og:description" content="Sistem manajemen turnamen badminton — pendaftaran, jadwal, bagan, dan skor pertandingan.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="BADMINTIME | Tournament Management System">
+<link rel="icon" href="images/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-zinc-50 dark:bg-ink text-zinc-800 dark:text-zinc-100 transition-colors">
+
+<!-- ===================== LOADING SCREEN ===================== -->
+<div id="loadingScreen" class="fixed inset-0 z-50 bg-ink flex flex-col items-center justify-center text-white">
+  <div class="text-5xl mb-4 shuttle-spin">&#127992;</div>
+  <div class="font-display font-extrabold text-2xl tracking-wide">BADMINTIME</div>
+  <div class="text-xs text-white/50 mt-1 tracking-[0.3em]">TOURNAMENT MANAGEMENT SYSTEM</div>
+  <div id="loadingFailsafeMsg" class="hidden mt-5 max-w-xs text-center text-[11px] leading-relaxed text-red-300 px-4"></div>
+</div>
+
+<script>
+/* ---------- FAILSAFE LOADING SCREEN ----------
+   Script kecil ini SENGAJA diletakkan terpisah dari script utama (yang ada
+   di akhir <body>) dan dijalankan sesegera mungkin. Tujuannya: apa pun yang
+   terjadi pada script utama nanti (mis. CDN diblokir jaringan sekolah,
+   error tak terduga, versi deployment lama, dsb), layar loading DIJAMIN
+   tidak akan berputar selamanya. Kalau setelah 6 detik layar loading masih
+   terlihat, script ini akan memaksa menyembunyikannya dan menampilkan pesan
+   yang jelas ke pengguna (bukan sekadar macet tanpa penjelasan). */
+(function(){
+  var FAILSAFE_MS = 6000;
+  var done = false;
+  var capturedErrors = [];
+  function forceHide(msg){
+    if(done) return; done = true;
+    var ls = document.getElementById('loadingScreen');
+    if(!ls) return;
+    if(msg){
+      var full = msg;
+      if(capturedErrors.length){
+        full += '\n\n[Detail teknis untuk dilaporkan]\n' + capturedErrors.slice(0,3).join('\n');
+      } else {
+        full += '\n\n[Detail teknis untuk dilaporkan]\nTidak ada error JS tertangkap — kemungkinan koneksi/CDN yang lambat atau diblokir.';
+      }
+      var box = document.getElementById('loadingFailsafeMsg');
+      if(box){ box.textContent = full; box.style.whiteSpace = 'pre-wrap'; box.classList.remove('hidden'); }
+    }
+    ls.style.transition = 'opacity .4s ease';
+    ls.style.opacity = msg ? '1' : '0';
+    if(!msg){ setTimeout(function(){ ls.classList.add('hidden'); }, 400); }
+  }
+  window.__badmintimeForceHideLoading = forceHide;
+  window.addEventListener('error', function(e){
+    var detail = (e && e.error && (e.error.stack || e.error.message)) || e.message || 'Unknown error';
+    var loc = (e && e.filename) ? (' @ ' + e.filename.split('/').pop() + ':' + e.lineno) : '';
+    capturedErrors.push(detail + loc);
+    console.error('[Failsafe] Menangkap error:', detail, loc);
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    var detail = (e && e.reason && (e.reason.stack || e.reason.message)) || String(e.reason);
+    capturedErrors.push('Promise rejection: ' + detail);
+    console.error('[Failsafe] Unhandled promise rejection:', detail);
+  });
+  setTimeout(function(){
+    forceHide('Aplikasi gagal dimuat sepenuhnya (kemungkinan koneksi ke server Google diblokir jaringan, atau versi deployment belum diperbarui). Coba muat ulang halaman (F5), pastikan internet stabil, atau hubungi admin untuk mengecek deployment Apps Script.');
+  }, FAILSAFE_MS);
+})();
+</script>
+
+<!-- ===================== LANDING SCREEN ===================== -->
+<div id="landingScreen" class="hidden min-h-screen">
+  <header class="sticky top-0 z-20 glass border-b border-zinc-200/70 dark:border-zinc-800">
+    <div class="max-w-6xl mx-auto flex items-center justify-between px-5 py-3">
+      <div class="flex items-center gap-2">
+        <div id="landingHeaderLogo" class="text-2xl leading-none">&#127992;</div>
+        <div class="leading-tight">
+          <div class="font-display font-extrabold text-sm" id="landingTitle">BADMINTIME</div>
+          <div class="text-[10px] text-zinc-400 tracking-widest">TOURNAMENT</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="toggleDark()" class="w-9 h-9 rounded-full border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500"><i class="fa-solid fa-moon text-xs"></i></button>
+        <button onclick="showScreen('pesertaCheckScreen')" class="btn-ghost text-xs"><i class="fa-solid fa-magnifying-glass"></i> Cek Status</button>
+        <button onclick="showScreen('loginScreen')" class="btn-ghost text-xs"><i class="fa-solid fa-right-to-bracket"></i> Masuk Admin</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="relative overflow-hidden court-line">
+    <div class="max-w-6xl mx-auto px-5 py-16 md:py-24 text-center">
+      <div id="landingHeroLogoBox" class="hidden mb-5 flex items-center justify-center"><img id="landingHeroLogo" src="" class="h-20 md:h-28 w-auto object-contain mx-auto"></div>
+      <span class="badge bg-primary-light text-primary mb-4 inline-block">TURNAMEN BULUTANGKIS BEREGU</span>
+      <h1 class="font-display font-extrabold text-4xl md:text-6xl leading-tight mb-4 text-white" id="landingHero">BADMINTIME<br><span class="text-white">Tournament</span></h1>
+       <div class="creator-credit mb-5">Oleh : Eden Rendi, S.Pd</div>
+      <p class="text-zinc-500 dark:text-zinc-400 max-w-xl mx-auto mb-8" id="landingSub">Format beregu 5 partai &#8212; Tunggal Putra, Tunggal Putri, Ganda Putra, Ganda Putri, dan Mix Double. Daftar sekarang dan jadilah juara!</p>
+      <button onclick="openRegister()" class="bg-primary hover:bg-primary-dark text-white font-display font-bold text-lg px-8 py-4 rounded-2xl shadow-soft inline-flex items-center gap-2">
+        <i class="fa-solid fa-shuttlecock"></i> DAFTAR SEKARANG
+      </button>
+      <div>
+        <button onclick="openPanduanPendaftaran()" class="mt-3 text-sm font-semibold text-primary hover:underline inline-flex items-center gap-1.5">
+          <i class="fa-regular fa-circle-question"></i> Klik disini cara pendaftaran
+        </button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-2xl mx-auto mt-12" id="landingStats"></div>
+    </div>
+  </section>
+
+  <section id="landingPendaftaranSection" class="max-w-6xl mx-auto px-5 pb-4 hidden">
+    <div class="bg-white dark:bg-zinc-900 rounded-2xl shadow-softer border border-zinc-100 dark:border-zinc-800 p-6 md:p-8">
+      <div class="flex items-center gap-2 mb-5">
+        <i class="fa-solid fa-calendar-days text-primary text-xl"></i>
+        <h2 class="font-display font-bold text-lg">Informasi &amp; Jadwal Pendaftaran</h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div id="landingDaftarDibuka" class="hidden bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-zinc-400 font-semibold mb-1"><i class="fa-solid fa-door-open mr-1"></i> Pendaftaran Dibuka</div>
+          <div class="text-sm font-bold" id="landingDaftarDibukaText">-</div>
+        </div>
+        <div id="landingDaftarDitutup" class="hidden bg-zinc-50 dark:bg-zinc-800/50 rounded-xl p-4">
+          <div class="text-[11px] uppercase tracking-wide text-zinc-400 font-semibold mb-1"><i class="fa-solid fa-door-closed mr-1"></i> Pendaftaran Ditutup</div>
+          <div class="text-sm font-bold" id="landingDaftarDitutupText">-</div>
+        </div>
+      </div>
+      <div id="landingCountdownDaftarBox" class="hidden mt-5 pt-5 border-t border-zinc-100 dark:border-zinc-800">
+        <div class="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-2">Sisa Waktu Pendaftaran</div>
+        <div id="landingCountdownDaftar" class="cd-grid max-w-md"></div>
+      </div>
+      <div id="landingCountdownBayarBox" class="hidden mt-5 pt-5 border-t border-zinc-100 dark:border-zinc-800">
+        <div class="text-[11px] uppercase tracking-wide text-zinc-400 font-semibold mb-1"><i class="fa-solid fa-money-bill-wave mr-1"></i> Batas Akhir Pembayaran</div>
+        <div class="text-sm font-bold mb-2" id="landingBatasBayarText">-</div>
+        <div id="landingCountdownBayar" class="cd-grid max-w-md"></div>
+      </div>
+      <div id="landingThbBox" class="hidden mt-5 pt-5 border-t border-zinc-100 dark:border-zinc-800">
+        <a id="landingThbLink" href="#" target="_blank" rel="noopener" class="btn-primary inline-flex items-center gap-2"><i class="fa-solid fa-file-pdf"></i> Lihat / Unduh Technical Handbook (THB)</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="max-w-6xl mx-auto px-5 pb-16">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div onclick="renderPublicBagan()" class="cursor-pointer bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 hover:border-primary/40 transition">
+        <i class="fa-solid fa-diagram-project text-2xl text-primary mb-2"></i>
+        <div class="font-display font-semibold">Bagan Pertandingan</div>
+        <div class="text-xs text-zinc-400">Lihat bagan turnamen 8 tim secara langsung</div>
+      </div>
+      <div onclick="renderPublicHasil()" class="cursor-pointer bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 hover:border-primary/40 transition">
+        <i class="fa-solid fa-ranking-star text-2xl text-primary mb-2"></i>
+        <div class="font-display font-semibold">Hasil &amp; Klasemen</div>
+        <div class="text-xs text-zinc-400">Skor dan hasil pertandingan realtime</div>
+      </div>
+      <div onclick="showScreen('pesertaCheckScreen')" class="cursor-pointer bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 hover:border-primary/40 transition">
+        <i class="fa-solid fa-id-card text-2xl text-primary mb-2"></i>
+        <div class="font-display font-semibold">Status Pendaftaran</div>
+        <div class="text-xs text-zinc-400">Cek status, jadwal, dan hasil Anda</div>
+      </div>
+    </div>
+    <div id="publicPanel" class="mt-6"></div>
+  </section>
+
+  <section id="landingYoutubeSection" class="max-w-6xl mx-auto px-5 pb-4 hidden">
+    <div class="flex items-center gap-2 mb-4">
+      <i class="fa-brands fa-youtube text-red-600 text-xl"></i>
+      <h2 class="font-display font-bold text-lg">Video Turnamen</h2>
+    </div>
+    <div id="landingYoutubeGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </section>
+
+  <section class="max-w-6xl mx-auto px-5 pb-12">
+    <div id="landingWaSection" class="hidden bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-2xl p-5 md:p-6 shadow-soft flex flex-col md:flex-row items-center gap-4 text-white">
+      <div class="w-14 h-14 rounded-full bg-white/15 flex items-center justify-center text-2xl shrink-0"><i class="fa-brands fa-whatsapp"></i></div>
+      <div class="flex-1 text-center md:text-left">
+        <div class="font-display font-bold">Ada Pertanyaan?</div>
+        <div class="text-sm text-white/85">Hubungi Admin langsung lewat WhatsApp, respon cepat.</div>
+      </div>
+      <a id="landingWaBtn" href="#" target="_blank" rel="noopener" class="bg-white text-emerald-600 font-display font-bold text-sm px-5 py-2.5 rounded-xl shadow inline-flex items-center gap-2 hover:bg-emerald-50 transition">
+        <i class="fa-brands fa-whatsapp"></i> Chat WhatsApp
+      </a>
+    </div>
+  </section>
+
+  <footer class="text-center text-xs text-zinc-400 py-6 border-t border-zinc-100 dark:border-zinc-800">
+    <span id="landingFooterCopyright">&copy; 2026 BADMINTIME Management System</span>
+  </footer>
+</div>
+
+<!-- ===================== REGISTER SCREEN ===================== -->
+<div id="registerScreen" class="hidden min-h-screen flex items-center justify-center p-5 court-line">
+  <div class="absolute top-5 left-0 right-0 text-center creator-credit">Oleh : Eden Rendi, S.Pd</div>
+  <div class="w-full max-w-lg bg-white dark:bg-zinc-900 rounded-2xl shadow-soft p-6 md:p-8 fade-in">
+    <button onclick="showScreen('landingScreen')" class="text-xs text-zinc-400 mb-4"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
+    <h2 class="font-display font-bold text-2xl mb-1">Form Pendaftaran</h2>
+    <p class="text-sm text-zinc-500 dark:text-zinc-400 mb-6">Isi data diri untuk mendaftar sebagai peserta turnamen.</p>
+    <form id="regForm" onsubmit="return submitRegister(event)" class="space-y-4 text-sm">
+      <div><label class="lbl">Nama Koordinator</label><input id="r_nama" class="inp" required placeholder="Nama guru/koordinator pendaftar"></div>
+      <div><label class="lbl">Asal Sekolah</label><input id="r_sekolah" class="inp" required></div>
+      <div><label class="lbl">Nomor HP Koordinator</label><input id="r_hp" class="inp" type="tel" required placeholder="08xxxxxxxxxx"></div>
+      <div>
+        <label class="lbl">GUGUS</label>
+        <select id="r_gugus" class="inp" required>
+          <option value="" disabled selected hidden>&#8212; Pilih Gugus &#8212;</option>
+        </select>
+        <p class="text-[11px] text-zinc-400 mt-1"><i class="fa-solid fa-circle-info mr-1"></i>Silakan pilih nama gugus sesuai wilayah asal sekolah Anda.</p>
+      </div>
+      <div>
+        <label class="lbl">Kategori <span class="text-primary">(Wajib Terisi Semua)</span></label>
+        <div id="r_kategoriBox" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+        <p class="text-[11px] text-zinc-400 mt-1"><i class="fa-solid fa-circle-info mr-1"></i>Centang kategori yang diikuti &#8212; form data pemain akan terbuka satu per satu. Isi lalu klik <b>Simpan Kategori</b>. Kategori yang sudah tersimpan akan bertanda &#10003; hijau.</p>
+      </div>
+      <div id="r_pemainBox" class="space-y-4"></div>
+      <button type="submit" class="w-full bg-primary hover:bg-primary-dark text-white font-display font-bold rounded-xl py-3 shadow-soft">DAFTAR</button>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== REGISTER SUCCESS SCREEN ===================== -->
+<div id="regSuccessScreen" class="hidden min-h-screen flex items-center justify-center p-5 court-line">
+  <div class="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-soft p-6 md:p-8 text-center fade-in">
+    <div class="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 flex items-center justify-center mx-auto mb-4 text-2xl"><i class="fa-solid fa-check"></i></div>
+    <h2 class="font-display font-bold text-xl mb-1">Pendaftaran Berhasil!</h2>
+    <p class="text-xs text-zinc-400 mb-4">Simpan nomor registrasi Anda untuk mengecek status.</p>
+    <div class="font-mono font-bold text-lg text-primary bg-primary-light dark:bg-primary/10 rounded-xl py-2 mb-4" id="regNumberDisplay"></div>
+    <div id="regQrBox" class="flex justify-center mb-4"></div>
+    <span class="badge bg-amber-100 text-amber-700">Menunggu Verifikasi</span>
+    <div class="flex gap-2 mt-6">
+      <button onclick="downloadBuktiPdf()" class="btn-ghost flex-1 justify-center"><i class="fa-solid fa-file-pdf"></i> Unduh PDF</button>
+      <button onclick="smartPrint('Cetak Bukti Pendaftaran')" class="btn-ghost flex-1 justify-center"><i class="fa-solid fa-print"></i> Print</button>
+    </div>
+    <button onclick="showScreen('landingScreen')" class="text-xs text-zinc-400 mt-5"><i class="fa-solid fa-house"></i> Kembali ke Beranda</button>
+  </div>
+</div>
+
+<!-- ===================== PESERTA CHECK SCREEN ===================== -->
+<div id="pesertaCheckScreen" class="hidden min-h-screen flex items-center justify-center p-5 court-line">
+  <div class="w-full max-w-md fade-in">
+    <div class="bg-white dark:bg-zinc-900 rounded-2xl shadow-soft p-6 md:p-8">
+      <button onclick="showScreen('landingScreen')" class="text-xs text-zinc-400 mb-4"><i class="fa-solid fa-arrow-left"></i> Kembali</button>
+      <h2 class="font-display font-bold text-xl mb-1">Cek Status Pendaftaran</h2>
+      <p class="text-xs text-zinc-400 mb-4">Masukkan <b>nomor HP koordinator</b> yang digunakan saat mendaftar (atau nomor registrasi) untuk melihat seluruh data yang sudah didaftarkan. Klik status pendaftaran pada hasil untuk memperbaiki data.</p>
+      <div class="flex gap-2">
+        <input id="checkQuery" type="tel" class="inp" placeholder="mis. 08xxxxxxxxxx atau REG-XXXXXX">
+        <button onclick="doPesertaCheck()" class="btn-primary shrink-0"><i class="fa-solid fa-magnifying-glass"></i></button>
+      </div>
+    </div>
+    <div id="pesertaCheckResult" class="mt-4"></div>
+  </div>
+</div>
+
+<!-- ===================== LOGIN SCREEN ===================== -->
+<div id="loginScreen" class="hidden min-h-screen flex items-center justify-center p-5 bg-ink court-line">
+  <div class="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-soft p-6 md:p-8 fade-in">
+    <button onclick="showScreen('landingScreen')" class="text-xs text-zinc-400 mb-4"><i class="fa-solid fa-arrow-left"></i> Kembali ke Beranda</button>
+    <div class="text-center mb-6">
+      <span class="text-3xl">&#127992;</span>
+      <h2 class="font-display font-bold text-xl mt-2">Masuk Admin</h2>
+      <p class="text-xs text-zinc-400">Khusus Administrator Turnamen</p>
+    </div>
+    <form onsubmit="return handleLogin(event)" class="space-y-3 text-sm">
+      <div><label class="lbl">Username</label><input id="loginUser" class="inp" required></div>
+      <div><label class="lbl">Password</label><input id="loginPass" type="password" class="inp" required></div>
+      <button type="submit" class="w-full bg-primary hover:bg-primary-dark text-white font-display font-bold rounded-xl py-3 shadow-soft mt-2">LOGIN</button>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== MAIN APP (ADMIN/PANITIA) ===================== -->
+<div id="app" class="hidden min-h-screen">
+  <div class="flex">
+    <aside id="sidebar" class="fixed z-30 md:static w-64 h-screen bg-ink text-white flex flex-col -translate-x-full md:translate-x-0 transition-transform no-print">
+      <div class="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+        <div id="sidebarLogoBox" class="w-10 h-10 rounded-xl bg-primary/25 flex items-center justify-center overflow-hidden text-lg">&#127992;</div>
+        <div class="leading-tight">
+          <div class="font-display font-bold text-sm" id="sidebarTitle">BADMINTIME</div>
+          <div class="text-[11px] text-white/50">Tournament Management</div>
+           <div class="creator-credit">Oleh : Eden Rendi, S.Pd</div>
+        </div>
+      </div>
+      <nav id="sideNav" class="flex-1 overflow-y-auto px-3 py-4 space-y-1 text-sm"></nav>
+      <div class="p-4 border-t border-white/10 text-[11px] text-white/40"><div>v1.0.0 &#183; BADMINTIME</div><div class="creator-credit mt-1">Oleh : Eden Rendi, S.Pd</div></div>
+    </aside>
+    <div id="sidebarOverlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 bg-black/40 z-20 md:hidden"></div>
+
+    <div class="flex-1 min-w-0">
+      <header class="sticky top-0 z-10 glass border-b border-zinc-200/70 dark:border-zinc-800 no-print">
+        <div class="flex items-center gap-3 px-4 md:px-6 py-3">
+          <button onclick="toggleSidebar()" class="md:hidden w-9 h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 flex items-center justify-center"><i class="fa-solid fa-bars"></i></button>
+          <div class="relative flex-1 max-w-md">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+            <input id="globalSearch" oninput="globalSearch(this.value)" placeholder="Cari nama peserta / tim / nomor registrasi..." class="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full pl-9 pr-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40">
+            <div id="searchResults" class="hidden absolute mt-2 w-full bg-white dark:bg-zinc-800 rounded-xl shadow-soft border border-zinc-100 dark:border-zinc-700 max-h-72 overflow-y-auto z-20"></div>
+          </div>
+          <div class="ml-auto flex items-center gap-2">
+            <button onclick="toggleDark()" class="w-9 h-9 rounded-full border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500"><i class="fa-solid fa-moon text-xs"></i></button>
+            <div class="relative">
+              <button onclick="toggleUserMenu()" class="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border border-zinc-200 dark:border-zinc-700">
+                <div id="userAvatar" class="w-7 h-7 rounded-full bg-primary text-white text-xs flex items-center justify-center font-semibold">A</div>
+                <span id="userNameTop" class="text-xs font-semibold hidden sm:block">Admin</span>
+                <i class="fa-solid fa-chevron-down text-[9px] text-zinc-400"></i>
+              </button>
+              <div id="userMenu" class="hidden absolute right-0 mt-2 w-48 bg-white dark:bg-zinc-800 rounded-xl shadow-soft border border-zinc-100 dark:border-zinc-700 p-2 text-sm z-20">
+                <a href="#pengaturan" class="block px-3 py-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-700"><i class="fa-solid fa-gear w-4"></i> Pengaturan</a>
+                <button onclick="toggleUserMenu();formChangeOwnPassword()" class="w-full text-left px-3 py-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-700"><i class="fa-solid fa-key w-4"></i> Ganti Password</button>
+                <button onclick="logout()" class="w-full text-left px-3 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-500"><i class="fa-solid fa-right-from-bracket w-4"></i> Keluar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+      <main id="mainContent" class="p-4 md:p-6 max-w-[1400px] mx-auto"></main>
+    </div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
+
+
