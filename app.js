@@ -240,8 +240,10 @@ async function pushDBToCloud(){
     let json = null; try{ json = await res.json(); }catch(e){}
     if(json && json.ok===false) throw new Error(json.error||'Gagal menyimpan ke cloud');
     window._cloudStatus = { state:'success', lastSyncAt:new Date().toISOString(), lastError:null };
+    showCloudSaveToast_(true);
   }catch(e){
     window._cloudStatus = { state:'error', lastSyncAt: window._cloudStatus.lastSyncAt, lastError:e.message };
+    showCloudSaveToast_(false, e.message);
   } finally { _cloudPushing=false; updateCloudStatusUI(); }
 }
 async function pullDBFromCloud(silent){
@@ -270,6 +272,55 @@ async function pullDBFromCloud(silent){
 function manualCloudSync(){
   if(!cloudSyncEnabled()){ Swal.fire({icon:'info', title:'URL Apps Script belum diatur', text:'Buka menu Pengaturan > Integrasi Google Apps Script, isi URL /exec terlebih dahulu.', confirmButtonColor:'#2563EB'}); return; }
   pullDBFromCloud(false);
+}
+
+/* ---------- Notifikasi "tersimpan ke server" ----------
+   Toast terpisah dari toast "tersimpan" lokal yang sudah ada di berbagai
+   tempat (yang cuma menandakan tersimpan ke localStorage/perangkat ini).
+   Toast ini khusus menandakan status pengiriman ke Google Sheet/Drive
+   (server utama), supaya admin/peserta tahu pasti datanya sudah sampai ke
+   server, bukan cuma tersimpan di HP/laptop masing-masing. Diberi jeda
+   minimal supaya tidak spam kalau ada banyak perubahan beruntun. */
+let _lastCloudToastAt = 0;
+function showCloudSaveToast_(ok, reason){
+  const now = Date.now();
+  if(ok && now - _lastCloudToastAt < 4000) return;
+  _lastCloudToastAt = now;
+  if(ok){
+    Swal.fire({toast:true, position:'top-end', icon:'success', title:'Tersimpan ke server \u2713', showConfirmButton:false, timer:1800});
+  } else {
+    Swal.fire({toast:true, position:'top-end', icon:'error', title:'Gagal tersimpan ke server', text: reason || 'Cek koneksi internet, data masih aman di perangkat ini', showConfirmButton:false, timer:3000});
+  }
+}
+
+/* ---------- Kirim pendaftaran peserta LANGSUNG ke server (atomik) ----------
+   Berbeda dari pushDBToCloud() (yang mengirim & MENIMPA seluruh database),
+   fungsi ini memanggil endpoint 'registerpeserta' di Code.gs yang HANYA
+   MENAMBAHKAN peserta baru ke data yang sudah tersimpan di server, di dalam
+   kunci (lock) di sisi server. Ini memastikan:
+     - Pendaftaran tetap tersimpan ke server walau admin sedang offline.
+     - Kalau banyak peserta mendaftar hampir bersamaan dari HP berbeda,
+       pendaftaran tidak saling menimpa (masalah lama pada mekanisme
+       "simpan seluruh database" yang bisa membuat pendaftaran salah satu
+       peserta hilang tanpa terlihat error apa pun). */
+async function registerPesertaToCloud_(pesertaArr, linkedTeam, nomorRegistrasi){
+  const url = (DB && DB.settings && DB.settings.gasUrl) || resolvedGasUrl_();
+  if(!url) return {ok:false, reason:'URL Apps Script belum diatur di config.js'};
+  try{
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({
+        action:'registerpeserta',
+        peserta: pesertaArr,
+        team: linkedTeam ? {id:linkedTeam.id, poin:linkedTeam.poin, statusPendaftaran:linkedTeam.statusPendaftaran} : null,
+        nomorRegistrasi
+      })
+    });
+    let json = null; try{ json = await res.json(); }catch(e){}
+    if(json && json.ok===false) throw new Error(json.error||'Gagal menyimpan ke server');
+    return {ok:true};
+  }catch(e){ return {ok:false, reason:e.message}; }
 }
 
 /* ---------- Auto-refresh berkala ----------
@@ -701,14 +752,31 @@ function submitRegister(e){
       });
     });
   });
-  pesertaBaru.forEach(p=>{ DB.peserta.push(p); syncToGoogleSheet('PESERTA','create',p); });
+  pesertaBaru.forEach(p=>{ DB.peserta.push(p); });
   // Jika admin sudah pernah menetapkan Team untuk gugus ini, pemain baru
   // otomatis ikut masuk ke Team tersebut tanpa perlu aksi tambahan.
   resyncPesertaTeamLinks();
   const linkedTeam = DB.teams.find(t=>t.gugus===gugus);
-  if(linkedTeam){ syncTeamMeta(linkedTeam); syncToGoogleSheet('TEAM','update',linkedTeam); }
+  if(linkedTeam){ syncTeamMeta(linkedTeam); }
   saveDB();
   addLog('Pendaftaran', `${namaKoordinator} (Gugus ${gugus}) mendaftarkan ${pesertaBaru.length} pemain dengan nomor ${nomorRegistrasi}`);
+  // Kirim pendaftaran LANGSUNG ke server (di luar mekanisme "simpan seluruh
+  // database" yang tertunda ~1.5 detik) supaya pendaftaran ini pasti sampai
+  // ke server -- termasuk saat admin sedang offline, dan tidak tertimpa
+  // kalau ada peserta lain yang mendaftar hampir bersamaan.
+  if(cloudSyncEnabled()){
+    window._cloudStatus.state='syncing'; updateCloudStatusUI();
+    registerPesertaToCloud_(pesertaBaru, linkedTeam, nomorRegistrasi).then(r=>{
+      if(r.ok){
+        window._cloudStatus = {state:'success', lastSyncAt:new Date().toISOString(), lastError:null};
+        showCloudSaveToast_(true);
+      }else{
+        window._cloudStatus = {state:'error', lastSyncAt:window._cloudStatus.lastSyncAt, lastError:r.reason};
+        showCloudSaveToast_(false, r.reason);
+      }
+      updateCloudStatusUI();
+    });
+  }
   window._lastReg = { nomorRegistrasi, koordinator:namaKoordinator, asalSekolah:sekolahTim, gugus, teamId:linkedTeam?linkedTeam.id:null, pemain:pesertaBaru };
   document.getElementById('regNumberDisplay').textContent = nomorRegistrasi;
   showScreen('regSuccessScreen');
@@ -2780,7 +2848,7 @@ function submitChangeOwnPassword(e){
 /* ---------- PENGATURAN ---------- */
 const CODE_GS_CONTENT = `/**
  * ==========================================================================
- * KKGO CUP \u2014 TOURNAMENT MANAGEMENT SYSTEM \u2014 Google Apps Script Backend
+ * KKGO CUP — TOURNAMENT MANAGEMENT SYSTEM — Google Apps Script Backend
  * ==========================================================================
  * FUNGSI:
  *  - Backend penyimpanan data untuk aplikasi KKGO CUP yang di-hosting di
@@ -2803,7 +2871,7 @@ const CODE_GS_CONTENT = `/**
  *     Beri nama project, misalnya "KKGO CUP Backend".
  *  4. Di editor Apps Script, hapus semua isi file "Code.gs" bawaan, lalu
  *     tempel SELURUH kode di bawah komentar ini (TIDAK perlu membuat file
- *     HTML apa pun \u2014 frontend-nya sudah ada terpisah di GitHub Pages).
+ *     HTML apa pun — frontend-nya sudah ada terpisah di GitHub Pages).
  *  5. Ganti nilai SPREADSHEET_ID di bawah dengan ID dari langkah 2.
  *  6. Klik Deploy > New deployment > pilih ikon roda gigi > Web app.
  *       - Execute as        : Me (akun Anda)
@@ -2840,8 +2908,12 @@ function doGet(e) {
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
+    if (body.action === 'registerpeserta') {
+      const result = registerPesertaAtomic_(body);
+      return jsonOutput_(result);
+    }
     if (body.action === 'savedb') {
-      writeDB_(body.db);
+      writeDBLocked_(body.db);
       return jsonOutput_({ ok: true, savedAt: new Date().toISOString() });
     }
     /* Kompatibilitas lama: sinkron satu entitas/baris ke tab sheet tertentu */
@@ -2887,6 +2959,84 @@ function writeDB_(db) {
   folder.createFile('db_backup_' + stamp + '.json', json, MimeType.PLAIN_TEXT);
   pruneBackups_(folder);
   mirrorToSheets_(db);
+}
+
+/* ---------- Kunci penulisan (LockService) ----------
+ * PENTING: Sebelumnya writeDB_ dipanggil langsung tanpa kunci. Kalau ada dua
+ * permintaan simpan yang datang HAMPIR bersamaan (mis. admin menyimpan skor
+ * DAN peserta lain mendaftar dalam detik yang sama), keduanya bisa
+ * membaca file db_current.json versi lama secara bersamaan, lalu menulis
+ * kembali versi masing-masing yang saling menimpa -> salah satu perubahan
+ * hilang tanpa ada error yang terlihat. LockService.getScriptLock() memaksa
+ * permintaan kedua MENUNGGU sampai permintaan pertama selesai membaca+
+ * menulis, sebelum ia baru boleh membaca versi terbaru. Ini yang membuat
+ * "savedb" (simpan seluruh data dari admin) dan "registerpeserta" (simpan
+ * pendaftaran peserta) tidak lagi bisa saling menimpa. */
+function withDbLock_(fn) {
+  const lock = LockService.getScriptLock();
+  const gotLock = lock.tryLock(30000); // tunggu maksimal 30 detik
+  if (!gotLock) throw new Error('Server sedang sibuk menyimpan data lain, coba lagi sebentar.');
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function writeDBLocked_(db) {
+  return withDbLock_(function () { writeDB_(db); return db; });
+}
+
+/* ---------- Pendaftaran peserta: ditambahkan LANGSUNG ke data server -----
+ * Tidak seperti "savedb" (yang mengirim & menimpa SELURUH database dari
+ * salinan lokal peserta), endpoint ini HANYA menambahkan peserta baru ke
+ * data yang sudah tersimpan di server, di dalam kunci (lock). Jadi:
+ *  - Kalau admin sedang offline, pendaftaran tetap masuk ke server (folder
+ *    Drive + Google Sheet) seperti biasa, dan otomatis terlihat begitu
+ *    admin login lagi / menarik data.
+ *  - Kalau ada BANYAK peserta mendaftar hampir bersamaan dari HP
+ *    berbeda-beda, tidak ada yang saling menimpa -> semua pendaftaran
+ *    tersimpan, karena tiap pendaftaran hanya MENAMBAH, tidak menimpa
+ *    seluruh database seperti mekanisme lama.
+ */
+function registerPesertaAtomic_(body) {
+  return withDbLock_(function () {
+    let db = readDB_();
+    if (!db) db = { users: [], gugus: [], teams: [], peserta: [], laga: [], baganMeta: { generated: false, order: [] }, juaraTeamId: null, logs: [], settings: {} };
+    if (!Array.isArray(db.peserta)) db.peserta = [];
+
+    const incoming = Array.isArray(body.peserta) ? body.peserta : [];
+    const existingIds = {};
+    db.peserta.forEach(function (p) { if (p && p.id) existingIds[p.id] = true; });
+    let addedCount = 0;
+    incoming.forEach(function (p) {
+      if (!p || !p.id) return;
+      if (existingIds[p.id]) return; // sudah ada (mis. permintaan terkirim dua kali), jangan duplikat
+      db.peserta.push(p);
+      existingIds[p.id] = true;
+      addedCount++;
+    });
+
+    // Perbarui metadata team terkait (mis. poin/status), kalau dikirim.
+    // Hanya field yang dikirim yang diperbarui, tidak menimpa seluruh tim.
+    if (body.team && body.team.id && Array.isArray(db.teams)) {
+      const t = db.teams.find(function (x) { return x.id === body.team.id; });
+      if (t) Object.keys(body.team).forEach(function (k) { if (k !== 'id') t[k] = body.team[k]; });
+    }
+
+    if (!Array.isArray(db.logs)) db.logs = [];
+    db.logs.unshift({
+      id: 'log-' + new Date().getTime() + '-' + Math.random().toString(36).slice(2, 8),
+      waktu: new Date().toISOString(),
+      jenis: 'Pendaftaran',
+      ket: 'Server menerima ' + addedCount + ' peserta baru' + (body.nomorRegistrasi ? ' (' + body.nomorRegistrasi + ')' : ''),
+      user: 'Sistem'
+    });
+    db.logs = db.logs.slice(0, 200);
+
+    writeDB_(db);
+    return { ok: true, added: addedCount, savedAt: new Date().toISOString() };
+  });
 }
 
 function pruneBackups_(folder) {
@@ -2964,7 +3114,8 @@ function upsertRow_(sheet, data, action) {
 
 function jsonOutput_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}`;
+}
+`;
 function downloadCodeGs(){
   const blob = new Blob([CODE_GS_CONTENT], {type:'text/plain'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Code.gs'; a.click();
