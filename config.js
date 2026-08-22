@@ -27,4 +27,4 @@
  *  - Kalau nanti backend di-deploy ulang dan URL /exec berubah, cukup
  *    update baris ini lalu upload ulang — tidak perlu ubah file lain.
  * ========================================================================= */
-const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybpaQqS-cpciBP-yZxss_ZJy6H1tvPOwL7Q5-6FQmgLfZ9ya04n2pumW2LUyPEyLpF/exec";
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyfkFlv1NLXIDIAFQ4wnz2GobcmMeg26-V3byOLud5p0-Mkm8egpqOGF257EUa2hReD/exec";
