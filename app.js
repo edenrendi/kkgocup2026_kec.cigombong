@@ -21,7 +21,7 @@ function resolvedGasUrl_(){
   try{
     if(typeof GAS_WEB_APP_URL === 'string'){
       const u = GAS_WEB_APP_URL.trim();
-      if(u && u.indexOf('https://script.google.com/macros/s/AKfycbybpaQqS-cpciBP-yZxss_ZJy6H1tvPOwL7Q5-6FQmgLfZ9ya04n2pumW2LUyPEyLpF/exec') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
+      if(u && u.indexOf('https://script.google.com/macros/s/AKfycbyfkFlv1NLXIDIAFQ4wnz2GobcmMeg26-V3byOLud5p0-Mkm8egpqOGF257EUa2hReD/exec') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
         return u;
       }
     }
@@ -189,7 +189,7 @@ function loadDB(){
      Drive supaya semua perangkat yang membuka link ini melihat data yang sama. */
   if(cloudSyncEnabled()) pullDBFromCloud(true);
 }
-function saveDB(){ SAFE_STORAGE.setItem(STORAGE_KEY, JSON.stringify(DB)); scheduleCloudPush(); }
+function saveDB(){ SAFE_STORAGE.setItem(STORAGE_KEY, JSON.stringify(DB)); window._settingsDirty=false; scheduleCloudPush(); }
 function addLog(jenis, ket){ DB.logs.unshift(mkLog(jenis, ket)); DB.logs = DB.logs.slice(0,200); saveDB(); }
 
 /* ---------- Google Apps Script Sync (legacy, per-entitas satu arah) ---------- */
@@ -209,6 +209,25 @@ let _cloudPushTimer = null;
 let _cloudPushing = false;
 let _cloudPulling = false;
 window._cloudStatus = { state:'idle', lastSyncAt:null, lastError:null };
+
+/* ---------- Lindungi form yang sedang diisi tapi belum disimpan ----------
+   BUG YANG DIPERBAIKI: sebelumnya, kalau admin sedang mengisi form (mis.
+   menambah beberapa link video YouTube satu per satu, yang perlu pindah ke
+   aplikasi/tab lain untuk menyalin tiap link), begitu admin kembali ke tab
+   ini, aplikasi otomatis menarik data terbaru dari server (autoPullIfSafe_)
+   dan me-render ULANG seluruh halaman Pengaturan dari data server -- yang
+   MENIMPA/MENGHAPUS isian yang sudah diketik tapi belum diklik "Simpan".
+   Makanya terasa seperti "link tiba-tiba hilang, harus diulang".
+   window._settingsDirty menandai "ada isian form yang belum disimpan" --
+   diset true begitu admin mengetik apa pun di dalam panel admin (#app),
+   dan direset ke false setiap kali saveDB() dipanggil (yaitu setiap admin
+   benar-benar mengklik tombol "Simpan"). Selama dirty=true, penarikan data
+   otomatis di latar belakang DITUNDA, supaya isian yang belum disimpan
+   tidak pernah tertimpa. */
+window._settingsDirty = false;
+document.addEventListener('input', function(e){
+  if(e.target && e.target.closest && e.target.closest('#app')) window._settingsDirty = true;
+}, true);
 
 function cloudSyncEnabled(){ return !!(DB && DB.settings && DB.settings.gasUrl); }
 
@@ -271,6 +290,10 @@ async function pullDBFromCloud(silent){
 }
 function manualCloudSync(){
   if(!cloudSyncEnabled()){ Swal.fire({icon:'info', title:'URL Apps Script belum diatur', text:'Buka menu Pengaturan > Integrasi Google Apps Script, isi URL /exec terlebih dahulu.', confirmButtonColor:'#2563EB'}); return; }
+  if(window._settingsDirty){
+    Swal.fire({icon:'warning', title:'Ada isian yang belum disimpan', text:'Klik tombol "Simpan" pada form yang sedang Anda isi terlebih dahulu, supaya isian itu tidak tertimpa data dari server.', confirmButtonColor:'#2563EB'});
+    return;
+  }
   pullDBFromCloud(false);
 }
 
@@ -341,6 +364,7 @@ function autoPullIfSafe_(){
   if(!cloudSyncEnabled()) return;
   if(_cloudPushing || _cloudPushTimer) return; /* ada perubahan lokal yang belum terkirim */
   if(isModalOpen_()) return; /* jangan ganggu form yang sedang diisi */
+  if(window._settingsDirty) return; /* ada isian form (mis. daftar video YouTube) yang belum diklik Simpan -- jangan timpa */
   pullDBFromCloud(true);
 }
 setInterval(autoPullIfSafe_, CLOUD_PULL_INTERVAL_MS);
