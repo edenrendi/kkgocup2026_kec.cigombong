@@ -21,7 +21,7 @@ function resolvedGasUrl_(){
   try{
     if(typeof GAS_WEB_APP_URL === 'string'){
       const u = GAS_WEB_APP_URL.trim();
-      if(u && u.indexOf('https://edenrendi.github.io/kkgocup2026_kec.cigombong/') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
+      if(u && u.indexOf('https://script.google.com/macros/s/AKfycbybpaQqS-cpciBP-yZxss_ZJy6H1tvPOwL7Q5-6FQmgLfZ9ya04n2pumW2LUyPEyLpF/exec') === -1 && /^https:\/\/script\.google(usercontent)?\.com\//.test(u)){
         return u;
       }
     }
