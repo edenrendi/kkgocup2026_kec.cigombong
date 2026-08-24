@@ -1967,19 +1967,21 @@ function renderUndian(){
         <ul id="undianCandidateList" class="space-y-1.5 max-h-[420px] overflow-y-auto"></ul>
       </div>
       <div class="undian-wheel-wrap">
-        <div class="undian-pointer"></div>
-        <canvas id="undianWheel" width="420" height="420"></canvas>
-        <button class="undian-spin-btn" id="undianSpinBtn" onclick="undianSpin_()">PUTAR<br>RODA</button>
-        <div class="undian-winner-modal" id="undianWinnerModal">
-          <h4 id="undianSlotTitleText">HASIL UNDIAN:</h4>
-          <div class="undian-winner-name" id="undianWinnerNameText"></div>
-          <button class="continue-btn btn-primary" style="border-radius:8px" onclick="undianContinue_()">LANJUTKAN</button>
+        <div class="undian-wheel-inner">
+          <div class="undian-pointer"></div>
+          <canvas id="undianWheel" width="380" height="380"></canvas>
+          <button class="undian-spin-btn" id="undianSpinBtn" onclick="undianSpin_()">PUTAR<br>RODA</button>
+          <div class="undian-winner-modal" id="undianWinnerModal">
+            <h4 id="undianSlotTitleText">HASIL UNDIAN:</h4>
+            <div class="undian-winner-name" id="undianWinnerNameText"></div>
+            <button class="continue-btn btn-primary" style="border-radius:8px" onclick="undianContinue_()">LANJUTKAN</button>
+          </div>
         </div>
         <div id="undianStatusText" class="text-xs text-zinc-500 dark:text-zinc-400 mt-4 text-center max-w-xs"></div>
       </div>
-      <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
+      <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-4 shadow-softer border border-zinc-100 dark:border-zinc-800">
         <h3 class="font-display font-bold text-sm mb-1"><i class="fa-solid fa-trophy text-primary mr-1"></i> Hasil Undian per Slot</h3>
-        <p class="text-[11px] text-zinc-400 mb-3">Otomatis tersimpan ke kartu Team masing-masing slot.</p>
+        <p class="text-[11px] text-zinc-400 mb-2.5">Otomatis tersimpan ke kartu Team masing-masing slot.</p>
         <div id="undianSlotContainer"></div>
       </div>
     </div>`;
@@ -4324,14 +4326,15 @@ styleTag.textContent = `
 
   /* ---------- Menu Undian (roda putar penentu Gugus per Slot) ---------- */
   .undian-wheel-wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+  .undian-wheel-inner{position:relative;display:inline-block;line-height:0}
   .undian-pointer{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-top:28px solid #E1122F;z-index:10}
-  #undianWheel{border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.22);background:#fff;max-width:100%;height:auto}
+  #undianWheel{display:block;border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.22);background:#fff;max-width:100%;height:auto}
   .undian-spin-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:84px;height:84px;border-radius:50%;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,#2563EB,#1E3A8A);border:4px solid #fff;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:5;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:4px}
   .undian-spin-btn:disabled{background:#bdc3c7;cursor:not-allowed}
   .undian-winner-modal{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(15,23,42,.96);color:#fff;padding:22px 26px;border-radius:16px;box-shadow:0 10px 28px rgba(0,0,0,.5);text-align:center;z-index:20;width:88%;max-width:300px;border:3px solid #f1c40f}
   .undian-winner-modal h4{margin:0 0 8px;font-size:13px;color:#f1c40f;letter-spacing:.5px}
   .undian-winner-modal .undian-winner-name{font-size:20px;font-weight:800;margin-bottom:14px;word-wrap:break-word;line-height:1.3}
-  .undian-slot-item{background:#F8FAFC;margin-bottom:8px;padding:9px 12px;border-radius:8px;border-left:4px solid #CBD5E1;font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+  .undian-slot-item{background:#F8FAFC;margin-bottom:6px;padding:6px 10px;border-radius:8px;border-left:4px solid #CBD5E1;font-size:12px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
   .dark .undian-slot-item{background:#27272A}
   .undian-slot-item.filled{border-left-color:#059669;background:#ECFDF5}
   .dark .undian-slot-item.filled{background:rgba(5,150,105,.15)}
