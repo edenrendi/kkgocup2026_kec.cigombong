@@ -217,10 +217,20 @@ UPDATE 2026
       <div><label class="lbl">Nomor HP Koordinator</label><input id="r_hp" class="inp" type="tel" required placeholder="08xxxxxxxxxx"></div>
       <div>
         <label class="lbl">GUGUS</label>
-        <select id="r_gugus" class="inp" required>
+        <select id="r_gugus" class="inp" required onchange="checkGugusDuplikat()">
           <option value="" disabled selected hidden>&#8212; Pilih Gugus &#8212;</option>
         </select>
         <p class="text-[11px] text-zinc-400 mt-1"><i class="fa-solid fa-circle-info mr-1"></i>Silakan pilih nama gugus sesuai wilayah asal sekolah Anda.</p>
+        <div id="r_gugusWarning" class="hidden mt-2 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-3 text-xs text-red-700 dark:text-red-400">
+          <div class="flex items-start gap-2">
+            <i class="fa-solid fa-triangle-exclamation mt-0.5"></i>
+            <div class="flex-1">
+              <div class="font-semibold">Gugus ini sudah didaftarkan. Silahkan hubungi admin.</div>
+              <div class="text-[11px] mt-1 opacity-80">Jika Anda koordinator gugus ini dan ingin memperbaiki data, gunakan menu <b>Cek Status Pendaftaran</b> di halaman utama.</div>
+              <a id="r_gugusWarningWa" href="#" target="_blank" class="hidden inline-flex items-center gap-1.5 mt-2 text-emerald-700 dark:text-emerald-400 font-semibold"><i class="fa-brands fa-whatsapp"></i> Hubungi Admin via WhatsApp</a>
+            </div>
+          </div>
+        </div>
       </div>
       <div>
         <label class="lbl">Kategori <span class="text-primary">(Wajib Terisi Semua)</span></label>
