@@ -1138,3 +1138,35 @@ span.badmintime-title *,
     color: #E1122F !important;
     -webkit-text-fill-color: #E1122F !important;
   }
+
+/* ---------- Jadwal Pertandingan Publik: penanda "sedang bertanding" ----------
+   Dipakai oleh buildPublicJadwalListHTML_() di app.js (panel Jadwal Pertandingan
+   di sebelah Bagan pada halaman awal) untuk menyorot partai yang jamnya sedang
+   berjalan SEKARANG, supaya peserta bisa langsung melihat pertandingan mana yang
+   sedang berlangsung tanpa perlu membaca satu-satu jam di tabel. */
+.jdw-live-pulse {
+  position: relative;
+  background: rgba(225, 18, 47, 0.08);
+  animation: jdwLivePulse 1.8s ease-in-out infinite;
+}
+.dark .jdw-live-pulse {
+  background: rgba(225, 18, 47, 0.16);
+}
+@keyframes jdwLivePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 18, 47, 0.35); }
+  50% { box-shadow: 0 0 0 7px rgba(225, 18, 47, 0); }
+}
+.jdw-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #E1122F;
+  display: inline-block;
+  animation: jdwLiveDot 1.2s ease-in-out infinite;
+}
+@keyframes jdwLiveDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .35; transform: scale(1.3); }
+}
+#publicJadwalLiveDot { display: inline-flex; }
+#publicJadwalLiveDot.hidden { display: none; }
