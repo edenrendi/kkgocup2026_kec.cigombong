@@ -894,11 +894,37 @@ function buildWaLink(){
 }
 function extractYoutubeId(url){
   if(!url) return '';
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{6,})/);
+  const str = url.trim();
+  if(!str) return '';
+  // Tautan yang sudah berupa ID video YouTube polos (10-12 karakter khas YouTube)
+  if(/^[A-Za-z0-9_-]{10,12}$/.test(str)) return str;
+  /* PERBAIKAN: link yang di-copy lewat tombol "Share" di HP sering berbentuk
+     youtube.com/watch?si=xxxxx&v=ID (parameter si= duluan, v= belakangan),
+     atau youtube.com/shorts/ID?si=xxxxx. Regex lama hanya mengenali pola
+     "watch?v=" persis di awal query string, jadi link seperti itu gagal
+     dikenali dan videonya hilang/tidak tampil. Di sini kita parse URL-nya
+     dengan benar (cari parameter v= di mana pun posisinya) dan baru jatuh
+     ke regex lama sebagai cadangan kalau URL-nya tidak valid. */
+  try{
+    const withProtocol = /^https?:\/\//i.test(str) ? str : 'https://' + str.replace(/^\/\//,'');
+    const u = new URL(withProtocol);
+    const host = u.hostname.replace(/^www\.|^m\./i,'').toLowerCase();
+    if(host === 'youtu.be'){
+      const id = u.pathname.split('/').filter(Boolean)[0];
+      if(id && /^[A-Za-z0-9_-]{6,}$/.test(id)) return id;
+    }
+    if(host === 'youtube.com' || host === 'music.youtube.com'){
+      const v = u.searchParams.get('v');
+      if(v && /^[A-Za-z0-9_-]{6,}$/.test(v)) return v;
+      const parts = u.pathname.split('/').filter(Boolean);
+      const idx = parts.findIndex(p=>['embed','shorts','live','v'].includes(p));
+      if(idx !== -1 && parts[idx+1] && /^[A-Za-z0-9_-]{6,}$/.test(parts[idx+1])) return parts[idx+1];
+    }
+  }catch(e){
+    // URL tidak valid -- lanjut ke regex cadangan di bawah
+  }
+  const m = str.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/|v\/))([A-Za-z0-9_-]{6,})/);
   if(m) return m[1];
-  // Tautan yang sudah berupa ID video YouTube polos (11 karakter khas YouTube)
-  const bare = url.trim();
-  if(/^[A-Za-z0-9_-]{10,12}$/.test(bare)) return bare;
   return '';
 }
 function youtubeSubscribeUrl(){
