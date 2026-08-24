@@ -189,7 +189,18 @@ function loadDB(){
      Drive supaya semua perangkat yang membuka link ini melihat data yang sama. */
   if(cloudSyncEnabled()) pullDBFromCloud(true);
 }
-function saveDB(){ SAFE_STORAGE.setItem(STORAGE_KEY, JSON.stringify(DB)); window._settingsDirty=false; scheduleCloudPush(); }
+function saveDB(){
+  SAFE_STORAGE.setItem(STORAGE_KEY, JSON.stringify(DB));
+  window._settingsDirty=false;
+  /* PERBAIKAN: catat kapan terakhir kali ada perubahan LOKAL yang disimpan.
+     Dipakai oleh pullDBFromCloud() untuk mendeteksi & membuang hasil tarikan
+     data dari server yang sudah BASI (dikirim SEBELUM perubahan ini dibuat),
+     supaya video/perubahan yang baru saja disimpan admin tidak tertimpa
+     balik oleh data lama begitu tarikan yang lambat itu akhirnya selesai.
+     Lihat penjelasan lengkap di pullDBFromCloud(). */
+  window._lastLocalChangeAt = Date.now();
+  scheduleCloudPush();
+}
 function addLog(jenis, ket){ DB.logs.unshift(mkLog(jenis, ket)); DB.logs = DB.logs.slice(0,200); saveDB(); }
 
 /* ---------- Google Apps Script Sync (legacy, per-entitas satu arah) ---------- */
@@ -209,6 +220,7 @@ let _cloudPushTimer = null;
 let _cloudPushing = false;
 let _cloudPulling = false;
 window._cloudStatus = { state:'idle', lastSyncAt:null, lastError:null };
+window._lastLocalChangeAt = 0;
 
 /* ---------- Lindungi form yang sedang diisi tapi belum disimpan ----------
    BUG YANG DIPERBAIKI: sebelumnya, kalau admin sedang mengisi form (mis.
@@ -263,17 +275,44 @@ async function pushDBToCloud(){
   }catch(e){
     window._cloudStatus = { state:'error', lastSyncAt: window._cloudStatus.lastSyncAt, lastError:e.message };
     showCloudSaveToast_(false, e.message);
-  } finally { _cloudPushing=false; updateCloudStatusUI(); }
+  } finally {
+    _cloudPushing=false;
+    _cloudPushTimer=null; /* PERBAIKAN: dulu tidak pernah direset -> autoPullIfSafe_() mengira
+      selamanya "masih ada kiriman tertunda" dan tidak pernah menarik data terbaru lagi
+      setelah pengiriman pertama ke cloud. */
+    updateCloudStatusUI();
+  }
 }
 async function pullDBFromCloud(silent){
   const url = (DB && DB.settings && DB.settings.gasUrl) || '';
   if(!url || _cloudPulling) return;
   _cloudPulling = true;
   if(!silent){ window._cloudStatus.state='syncing'; updateCloudStatusUI(); }
+  /* PERBAIKAN BUG UTAMA: catat SAAT tarikan ini mulai. Google Apps Script
+     kadang lambat merespons (beberapa detik, apalagi saat "cold start").
+     Kalau selama tarikan ini masih berjalan admin sempat mengubah &
+     menyimpan sesuatu (mis. menambah link video lalu klik "Simpan"), maka
+     begitu tarikan lambat ini akhirnya selesai, datanya sudah BASI --
+     dikirim server SEBELUM perubahan admin ada. Dulu, hasil basi ini tetap
+     ditimpakan begitu saja ke DB dan localStorage, sehingga video/perubahan
+     yang baru saja disimpan admin langsung LENYAP lagi tanpa sebab yang
+     terlihat ("hilang sendiri setelah klik Simpan"). Sekarang, kalau
+     terbukti ada perubahan lokal yang lebih baru dari saat tarikan ini
+     dimulai, hasil tarikan yang basi ini DIBUANG (tidak diterapkan) --
+     data lokal yang baru tetap dipakai, dan perubahan itu akan terkirim ke
+     server lewat pengiriman (push) yang sudah/akan berjalan seperti biasa. */
+  const pullStartedAt = Date.now();
   try{
     const sep = url.includes('?') ? '&' : '?';
     const res = await fetch(url+sep+'action=getdb');
     const json = await res.json();
+    if(window._lastLocalChangeAt > pullStartedAt){
+      /* Ada perubahan lokal yang dibuat SETELAH tarikan ini mulai -> hasil
+         tarikan ini basi, jangan diterapkan supaya tidak menimpa balik
+         perubahan yang baru saja disimpan admin. */
+      window._cloudStatus = { state:'success', lastSyncAt:new Date().toISOString(), lastError:null };
+      return;
+    }
     if(json && json.ok && json.db){
       DB = json.db;
       applyDBDefaults();
@@ -1294,13 +1333,17 @@ function renderPesertaTable(){
     const groupRows=rows.filter(p=>(p.gugus||'Tanpa Gugus')===g);
     const open=openGugusState[g]!==false;
     const groupIds=[...new Set(groupRows.map(p=>p.kelompokId))];
+    const pendingCount = groupRows.filter(p=>p.status==='Menunggu Verifikasi').length;
     return `<section class="gugus-panel rounded-2xl shadow-softer border border-zinc-200 dark:border-zinc-700 overflow-hidden" style="--gcolor:${color}">
-      <button onclick="toggleGugus('${escapeHtml(g)}')" class="w-full flex items-center gap-3 px-4 py-3 text-left">
-        <span class="w-3 h-3 rounded-full" style="background:${color}"></span>
-        <div class="flex-1"><div class="font-display font-bold text-sm">${escapeHtml(g)}</div><div class="text-[11px] text-zinc-400">${groupIds.length} pendaftaran \u00B7 ${groupRows.length} pemain</div></div>
-        <span class="badge" style="background:${color};color:#fff">${groupRows.filter(p=>p.status==='Terverifikasi').length} terverifikasi</span>
-        <i class="fa-solid fa-chevron-${open?'up':'down'} text-xs text-zinc-400"></i>
-      </button>
+      <div class="w-full flex items-center gap-3 px-4 py-3">
+        <button onclick="toggleGugus('${escapeHtml(g)}')" class="flex items-center gap-3 flex-1 min-w-0 text-left">
+          <span class="w-3 h-3 rounded-full shrink-0" style="background:${color}"></span>
+          <div class="flex-1 min-w-0"><div class="font-display font-bold text-sm truncate">${escapeHtml(g)}</div><div class="text-[11px] text-zinc-400">${groupIds.length} pendaftaran \u00B7 ${groupRows.length} pemain</div></div>
+          <span class="badge shrink-0" style="background:${color};color:#fff">${groupRows.filter(p=>p.status==='Terverifikasi').length} terverifikasi</span>
+        </button>
+        ${isAdmin() && pendingCount>0 ? `<button onclick="verifySemuaGugus('${escapeHtml(g)}')" class="btn-primary text-[11px] !py-1.5 !px-2.5 shrink-0" title="Verifikasi ${pendingCount} peserta yang masih menunggu di gugus ini"><i class="fa-solid fa-check-double"></i> Verifikasi Semua (${pendingCount})</button>` : ''}
+        <button onclick="toggleGugus('${escapeHtml(g)}')" class="shrink-0 px-1"><i class="fa-solid fa-chevron-${open?'up':'down'} text-xs text-zinc-400"></i></button>
+      </div>
       <div class="${open?'':'hidden'} border-t border-zinc-200/70 dark:border-zinc-700">
         ${groupIds.map(kid=>{
           const regRows=groupRows.filter(p=>p.kelompokId===kid);
@@ -1607,6 +1650,48 @@ function verifPeserta(id, ok){
   addLog('Verifikasi', `${ok?'Memverifikasi':'Menolak'} peserta ${p.nama}`);
   syncToGoogleSheet('PESERTA','update',p);
   renderPesertaTable();
+}
+/* ---------- Verifikasi semua peserta dalam satu gugus sekaligus ----------
+   Melengkapi verifPeserta() (satu per satu): tombol "Verifikasi Semua" di
+   header tiap gugus supaya admin tidak perlu klik centang satu-satu kalau
+   semua data di gugus itu sudah benar. Hanya peserta berstatus "Menunggu
+   Verifikasi" yang diubah -- peserta yang sudah "Ditolak" TIDAK ikut
+   otomatis diverifikasi (harus dicek manual satu per satu lewat tombol
+   centang), supaya penolakan yang sudah diputuskan admin tidak tertimpa
+   tanpa sengaja. */
+function verifySemuaGugus(gugus){
+  const targets = DB.peserta.filter(p=>(p.gugus||'Tanpa Gugus')===gugus && p.status==='Menunggu Verifikasi');
+  if(!targets.length){
+    Swal.fire({toast:true, position:'top-end', icon:'info', title:'Tidak ada peserta yang menunggu verifikasi di gugus ini', showConfirmButton:false, timer:1800});
+    return;
+  }
+  Swal.fire({
+    icon:'question',
+    title:`Verifikasi semua peserta di "${gugus}"?`,
+    text:`${targets.length} peserta yang berstatus "Menunggu Verifikasi" di gugus ini akan langsung diverifikasi. Peserta yang sudah ditolak tidak ikut berubah.`,
+    showCancelButton:true,
+    confirmButtonColor:'#059669',
+    confirmButtonText:'Ya, verifikasi semua',
+    cancelButtonText:'Batal'
+  }).then(r=>{
+    if(!r.isConfirmed) return;
+    const affectedTeams = new Set();
+    targets.forEach(p=>{
+      p.status = 'Terverifikasi';
+      if(p.teamId) affectedTeams.add(p.teamId);
+      syncToGoogleSheet('PESERTA','update',p);
+    });
+    affectedTeams.forEach(tid=>{
+      const team = DB.teams.find(t=>t.id===tid); if(!team) return;
+      const regRows = DB.peserta.filter(x=>x.teamId===tid);
+      team.statusPendaftaran = regRows.every(x=>x.status==='Terverifikasi')?'Terverifikasi':(regRows.some(x=>x.status==='Ditolak')?'Perlu Perbaikan':'Menunggu Verifikasi');
+      syncToGoogleSheet('TEAM','update',team);
+    });
+    saveDB();
+    addLog('Verifikasi', `Memverifikasi semua (${targets.length} peserta) di gugus ${gugus}`);
+    renderPesertaTable();
+    Swal.fire({toast:true, position:'top-end', icon:'success', title:`${targets.length} peserta di "${gugus}" berhasil diverifikasi`, showConfirmButton:false, timer:2000});
+  });
 }
 
 /* ---------- TEAM ---------- */
