@@ -3549,6 +3549,10 @@ function terapkanJadwalOtomatis(){
   if(hasClass_('[data-nav="bagan"]','bg-primary',true)) renderBaganPage();
 }
 function renderPengaturan(){
+  /* PERBAIKAN: siapkan teks draft daftar video SEBELUM template HTML di
+     bawah dibangun, supaya textarea-nya langsung terisi teks yang benar
+     saat pertama dirender (bukan lewat render-ulang terpisah setelahnya). */
+  window._ytDraft = (DB.settings.youtubeVideos||[]).map(v=> v.title ? `${v.url} | ${v.title}` : (v.url||'')).join('\n');
   document.getElementById('mainContent').innerHTML = `
     ${pageHeader('Pengaturan','Preferensi turnamen &amp; integrasi')}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -3610,8 +3614,12 @@ function renderPengaturan(){
         <div class="font-semibold text-sm"><i class="fa-brands fa-youtube text-red-600 mr-1"></i> Video &amp; Channel YouTube</div>
         <p class="text-xs text-zinc-400">Video akan tampil di halaman utama. Saat penonton klik video, tab baru terbuka ke channel Anda dengan tombol Subscribe siap diklik.</p>
         <div><label class="lbl">Link/Handle Channel YouTube</label><input id="p_ytChannel" class="inp" placeholder="https://youtube.com/@namachannel atau @namachannel" value="${escapeHtml(DB.settings.youtubeChannelUrl)}"></div>
-        <div><label class="lbl">Daftar Video</label><div id="ytVideoList" class="space-y-2"></div></div>
-        <button onclick="addYtVideoRow()" class="btn-ghost text-xs"><i class="fa-solid fa-plus"></i> Tambah Video</button>
+        <div>
+          <label class="lbl">Daftar Video</label>
+          <p class="text-[11px] text-zinc-400 mb-1.5">Tempel link YouTube di sini, <b>satu link per baris</b> &mdash; bisa langsung tempel banyak link sekaligus. Judul video bersifat opsional, tulis setelah tanda <code class="px-1 rounded bg-zinc-100 dark:bg-zinc-800">|</code>.</p>
+          <textarea id="ytVideoLinks" rows="6" class="inp w-full font-mono text-xs leading-relaxed" placeholder="https://youtu.be/xxxxxxxxxxx | Judul video (opsional)&#10;https://youtu.be/yyyyyyyyyyy&#10;https://youtu.be/zzzzzzzzzzz | Video ketiga" oninput="window._ytDraft=this.value;renderYtPreview();">${escapeHtml(window._ytDraft||'')}</textarea>
+          <div id="ytLinesWarning" class="text-[11px] text-red-500 mt-1 hidden"></div>
+        </div>
         <button onclick="saveYoutubeSettings()" class="btn-primary text-xs"><i class="fa-solid fa-floppy-disk"></i> Simpan Video &amp; Channel</button>
         <div class="pt-2 border-t border-zinc-100 dark:border-zinc-800">
           <div class="text-[11px] text-zinc-400 mb-2">Pratinjau tampilan di halaman utama:</div>
@@ -3619,6 +3627,7 @@ function renderPengaturan(){
         </div>
       </div>
     </div>
+
     <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 space-y-3 mb-4">
       <div class="font-semibold text-sm"><i class="fa-solid fa-calendar-days text-primary mr-1"></i> Pendaftaran &amp; Technical Handbook (THB)</div>
       <p class="text-xs text-zinc-400">Tanggal &amp; waktu di sini otomatis tampil di halaman utama, lengkap dengan hitungan mundur menuju penutupan pendaftaran dan batas akhir pembayaran.</p>
@@ -3649,8 +3658,7 @@ function renderPengaturan(){
       </ul>
     </div>`;
   renderPengaturanUploads();
-  window._ytDraft = DB.settings.youtubeVideos.map(v=>({...v}));
-  renderYtVideoRows();
+  renderYtPreview();
   updateCloudStatusUI();
 }
 function savePendaftaranSettings(){
@@ -3712,82 +3720,68 @@ function saveWaSettings(){
   addLog('Pengaturan','Memperbarui kontak WhatsApp admin');
   Swal.fire({toast:true, position:'top-end', icon:'success', title:'Kontak WhatsApp tersimpan', showConfirmButton:false, timer:1800});
 }
-function renderYtVideoRows(){
-  const box = document.getElementById('ytVideoList');
-  if(!box) return;
-  const rows = window._ytDraft || [];
-  /* PERBAIKAN: baris dengan link yang BELUM dikenali sebagai URL YouTube
-     yang valid tidak lagi disembunyikan/dihapus -- ditandai merah supaya
-     admin tahu persis baris mana yang perlu diperbaiki, dan tidak
-     kehilangan apa yang sudah diketik. */
-  box.innerHTML = rows.map((v,i)=>{
-    const hasUrl = !!(v.url && v.url.trim());
-    const invalidMark = hasUrl && !extractYoutubeId(v.url);
-    return `
-    <div class="flex gap-2 items-start">
-      <div class="flex-1">
-        <input class="inp w-full ${invalidMark?'border-red-400 dark:border-red-500':''}" placeholder="Link video YouTube" value="${escapeHtml(v.url||'')}" oninput="window._ytDraft[${i}].url=this.value;renderYtPreview();updateYtRowWarning(${i});">
-        <div id="ytRowWarning_${i}" class="text-[11px] text-red-500 mt-1 ${invalidMark?'':'hidden'}"><i class="fa-solid fa-triangle-exclamation"></i> Belum dikenali sebagai link YouTube yang valid \u2014 cek lagi link-nya.</div>
-      </div>
-      <input class="inp w-28" placeholder="Judul (opsional)" value="${escapeHtml(v.title||'')}" oninput="window._ytDraft[${i}].title=this.value">
-      <button onclick="removeYtVideoRow(${i})" class="icon-btn text-red-500"><i class="fa-solid fa-trash"></i></button>
-    </div>`;
-  }).join('') || `<div class="text-xs text-zinc-400">Belum ada video ditambahkan.</div>`;
-  renderYtPreview();
-}
-/* Menyalakan/mematikan tanda merah di bawah 1 baris saja saat admin mengetik,
-   TANPA menggambar ulang seluruh daftar (yang akan membuat kursor pindah /
-   fokus hilang setiap kali admin mengetik satu huruf). */
-function updateYtRowWarning(i){
-  const v = (window._ytDraft||[])[i]; if(!v) return;
-  const hasUrl = !!(v.url && v.url.trim());
-  const invalidMark = hasUrl && !extractYoutubeId(v.url);
-  const warnEl = document.getElementById('ytRowWarning_'+i);
-  const inputEl = warnEl && warnEl.previousElementSibling;
-  if(warnEl) warnEl.classList.toggle('hidden', !invalidMark);
-  if(inputEl) inputEl.classList.toggle('border-red-400', invalidMark);
+/* ---------- Daftar Video YouTube: format tempel-banyak-sekaligus ----------
+   Diganti dari model "klik Tambah Video lalu isi baris satu-satu" (rawan
+   bikin admin bingung -- kalau lupa klik Tambah dulu, daftarnya kelihatan
+   kosong padahal cuma belum ada barisnya) menjadi satu kotak teks: admin
+   tinggal TEMPEL semua link YouTube sekaligus, satu link per baris. Judul
+   opsional ditulis setelah tanda "|" di baris yang sama. */
+function parseYtDraftLines(){
+  return (window._ytDraft||'').split('\n').map(line=>{
+    const raw = line;
+    const trimmed = line.trim();
+    if(!trimmed) return null;
+    const parts = trimmed.split('|');
+    const url = (parts[0]||'').trim();
+    const title = parts.length>1 ? parts.slice(1).join('|').trim() : '';
+    return { url, title, raw };
+  }).filter(Boolean);
 }
 /* Pratinjau langsung di halaman Pengaturan, supaya admin langsung melihat
-   video akan tampil seperti apa di halaman utama begitu link dimasukkan. */
+   video akan tampil seperti apa di halaman utama begitu link ditempel --
+   dan menandai baris mana yang belum dikenali sebagai link YouTube, TANPA
+   menggambar ulang textarea-nya (supaya kursor/fokus admin saat mengetik
+   tidak terganggu). */
 function renderYtPreview(){
   const box = document.getElementById('ytPreviewBox');
+  const warnBox = document.getElementById('ytLinesWarning');
   if(!box) return;
-  const rows = (window._ytDraft||[]).filter(v=>extractYoutubeId(v.url));
-  box.innerHTML = rows.length ? rows.map(v=>{
+  const lines = parseYtDraftLines();
+  const valid = lines.filter(l=>extractYoutubeId(l.url));
+  const invalid = lines.filter(l=>l.url && !extractYoutubeId(l.url));
+  box.innerHTML = valid.length ? valid.map(v=>{
     const id = extractYoutubeId(v.url);
     return `<div class="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 aspect-video bg-zinc-100 dark:bg-zinc-800"><img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" class="w-full h-full object-cover" onerror="this.style.opacity=0.3"></div>`;
   }).join('') : `<div class="col-span-full text-[11px] text-zinc-400">Belum ada video valid \u2014 tempel link lengkap YouTube (mis. https://youtu.be/xxxxxxxxxxx).</div>`;
-}
-function addYtVideoRow(){
-  if(!window._ytDraft) window._ytDraft = [];
-  window._ytDraft.push({url:'', title:''});
-  renderYtVideoRows();
-}
-function removeYtVideoRow(i){
-  window._ytDraft.splice(i,1);
-  renderYtVideoRows();
+  if(warnBox){
+    if(invalid.length){
+      warnBox.classList.remove('hidden');
+      warnBox.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${invalid.length} baris belum dikenali sebagai link YouTube yang valid: ` + invalid.map(l=>`<span class="font-mono">${escapeHtml(l.raw.trim().slice(0,40))}</span>`).join(', ');
+    } else {
+      warnBox.classList.add('hidden');
+      warnBox.innerHTML = '';
+    }
+  }
 }
 function saveYoutubeSettings(){
   DB.settings.youtubeChannelUrl = document.getElementById('p_ytChannel').value.trim();
-  const draft = window._ytDraft || [];
-  const valid = draft.filter(v=>v.url && v.url.trim() && extractYoutubeId(v.url));
-  const invalid = draft.filter(v=>v.url && v.url.trim() && !extractYoutubeId(v.url));
-  DB.settings.youtubeVideos = valid.map(v=>({...v}));
+  const ta = document.getElementById('ytVideoLinks');
+  if(ta) window._ytDraft = ta.value;
+  const lines = parseYtDraftLines();
+  const valid = lines.filter(l=>l.url && extractYoutubeId(l.url));
+  const invalid = lines.filter(l=>l.url && !extractYoutubeId(l.url));
+  DB.settings.youtubeVideos = valid.map(l=>({url:l.url, title:l.title}));
   saveDB();
-  /* PERBAIKAN UTAMA: dulu window._ytDraft ditimpa dengan HANYA video yang
-     valid setelah simpan -- jadi baris yang link-nya belum dikenali (mis.
-     karena karakter tersembunyi dari copy-paste HP) langsung LENYAP dari
-     form tanpa jejak, walau sebenarnya cuma "belum tersimpan", bukan
-     "salah total". Sekarang draft TIDAK disentuh -- video yang valid tetap
+  /* Isi textarea TIDAK disentuh setelah simpan -- baris yang valid tetap
      tersimpan & langsung tampil di halaman utama, sementara baris yang
-     belum valid tetap ada di form (ditandai merah oleh renderYtVideoRows)
+     belum dikenali tetap ada di kotak teks (ditandai lewat ytLinesWarning)
      supaya admin bisa memperbaikinya, bukan mengetik ulang dari nol. */
-  renderYtVideoRows();
+  renderYtPreview();
   addLog('Pengaturan','Memperbarui pengaturan channel & video YouTube');
   if(invalid.length){
-    Swal.fire({icon:'warning', title:'Sebagian link belum tersimpan', text:`${invalid.length} link belum dikenali sebagai URL YouTube yang valid, jadi belum ikut tersimpan (tapi TIDAK dihapus). Baris itu ditandai merah di bawah \u2014 coba hapus lalu tempel ulang link-nya, lalu klik Simpan lagi.`, confirmButtonColor:'#E1122F'});
+    Swal.fire({icon:'warning', title:'Sebagian link belum tersimpan', text:`${invalid.length} baris belum dikenali sebagai URL YouTube yang valid, jadi belum ikut tersimpan (tapi TIDAK dihapus dari kotak teks). Baris itu ditandai di bawah kotak teks \u2014 coba cek lagi link-nya, lalu klik Simpan lagi.`, confirmButtonColor:'#E1122F'});
   } else {
-    Swal.fire({toast:true, position:'top-end', icon:'success', title:'Video & channel YouTube tersimpan \u2014 cek Beranda untuk melihatnya', showConfirmButton:false, timer:2200});
+    Swal.fire({toast:true, position:'top-end', icon:'success', title:`${valid.length} video & channel YouTube tersimpan \u2014 cek Beranda untuk melihatnya`, showConfirmButton:false, timer:2200});
   }
 }
 function saveKategoriAktif(){
