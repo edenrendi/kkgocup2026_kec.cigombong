@@ -894,7 +894,11 @@ function buildWaLink(){
 }
 function extractYoutubeId(url){
   if(!url) return '';
-  const str = url.trim();
+  /* PERBAIKAN: link yang di-copy dari aplikasi YouTube di HP kadang membawa
+     karakter tak kasat mata (zero-width space, BOM, dsb.) yang tidak
+     terlihat di kotak input tapi membuat link gagal dikenali. Karakter ini
+     dibuang dulu sebelum divalidasi. */
+  const str = url.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '').trim();
   if(!str) return '';
   // Tautan yang sudah berupa ID video YouTube polos (10-12 karakter khas YouTube)
   if(/^[A-Za-z0-9_-]{10,12}$/.test(str)) return str;
@@ -1316,7 +1320,13 @@ function renderPesertaTable(){
               <table class="w-full text-sm">
                 <thead class="text-left text-[11px] text-zinc-500"><tr><th class="px-2 py-2">Pemain</th><th class="px-2 py-2">Sekolah</th><th class="px-2 py-2">Kategori</th><th class="px-2 py-2">Robah Pemain</th><th class="px-2 py-2">Status</th><th class="px-2 py-2 text-right">Aksi</th></tr></thead>
                 <tbody>${regRows.map(p=>`<tr class="border-t border-zinc-100 dark:border-zinc-800">
-                  <td class="px-2 py-2 font-medium">${escapeHtml(p.nama)}</td>
+                  <td class="px-2 py-2 font-medium">
+                    <button onclick="viewPesertaFotoById('${p.id}')" class="flex items-center gap-2 text-left hover:text-primary group/foto" title="${p.foto?'Lihat foto':'Belum ada foto'}">
+                      ${p.foto?`<img src="${p.foto}" class="w-7 h-7 rounded-full object-cover border border-zinc-200 dark:border-zinc-700 shrink-0">`:`<div class="w-7 h-7 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center text-zinc-400 shrink-0"><i class="fa-solid fa-user text-[10px]"></i></div>`}
+                      <span>${escapeHtml(p.nama)}</span>
+                      <i class="fa-solid fa-eye text-[10px] ${p.foto?'text-zinc-400 group-hover/foto:text-primary':'text-zinc-300'}"></i>
+                    </button>
+                  </td>
                   <td class="px-2 py-2 text-xs text-zinc-500">${escapeHtml(p.asalSekolah)}</td>
                   <td class="px-2 py-2 text-xs"><span class="team-color-chip" style="background:${(KATEGORI_COLORS[p.kategoriId]||{}).border||'#64748B'}"></span> ${escapeHtml(p.kategori.map(kategoriNama).join(', '))}</td>
                   <td class="px-2 py-2">${robahPemainSelect(p, regRows)}</td>
@@ -1332,6 +1342,28 @@ function renderPesertaTable(){
       </div>
     </section>`;
   }).join('') || `<div class="bg-white/95 dark:bg-zinc-900 rounded-xl2 p-8 text-center text-zinc-400">${emptyState('fa-user-group','Belum ada peserta','Peserta akan muncul di sini setelah mendaftar lewat halaman publik.')}</div>`;
+}
+/* Fitur "mata" -- klik nama atau foto pemain di Daftar Peserta untuk melihat
+   foto peserta ukuran penuh dalam modal. Diambil dari DB.peserta lewat id
+   (bukan menempelkan foto base64 di setiap baris tabel) supaya tabel dengan
+   banyak peserta tetap ringan. */
+function viewPesertaFotoById(id){
+  const p = DB.peserta.find(x=>x.id===id);
+  if(!p) return;
+  if(!p.foto){
+    Swal.fire({toast:true, position:'top-end', icon:'info', title:'Peserta ini belum mengunggah foto', showConfirmButton:false, timer:1800});
+    return;
+  }
+  openModal(`<div class="p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h3 class="font-display font-bold text-sm">${escapeHtml(p.nama)}</h3>
+        <div class="text-[11px] text-zinc-400">${escapeHtml(p.asalSekolah||'')}</div>
+      </div>
+      <button onclick="closeModal()" class="text-zinc-400"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <img src="${p.foto}" class="w-full max-h-[70vh] object-contain rounded-xl mx-auto bg-zinc-100 dark:bg-zinc-800">
+  </div>`);
 }
 function toggleGugus(g){ openGugusState[g]=!(openGugusState[g]!==false); renderPesertaTable(); }
 function toggleAllGugus(open){ DB.gugus.forEach(g=>openGugusState[g]=open); renderPesertaTable(); }
@@ -3599,13 +3631,36 @@ function renderYtVideoRows(){
   const box = document.getElementById('ytVideoList');
   if(!box) return;
   const rows = window._ytDraft || [];
-  box.innerHTML = rows.map((v,i)=>`
-    <div class="flex gap-2">
-      <input class="inp flex-1" placeholder="Link video YouTube" value="${escapeHtml(v.url||'')}" oninput="window._ytDraft[${i}].url=this.value;renderYtPreview();">
+  /* PERBAIKAN: baris dengan link yang BELUM dikenali sebagai URL YouTube
+     yang valid tidak lagi disembunyikan/dihapus -- ditandai merah supaya
+     admin tahu persis baris mana yang perlu diperbaiki, dan tidak
+     kehilangan apa yang sudah diketik. */
+  box.innerHTML = rows.map((v,i)=>{
+    const hasUrl = !!(v.url && v.url.trim());
+    const invalidMark = hasUrl && !extractYoutubeId(v.url);
+    return `
+    <div class="flex gap-2 items-start">
+      <div class="flex-1">
+        <input class="inp w-full ${invalidMark?'border-red-400 dark:border-red-500':''}" placeholder="Link video YouTube" value="${escapeHtml(v.url||'')}" oninput="window._ytDraft[${i}].url=this.value;renderYtPreview();updateYtRowWarning(${i});">
+        <div id="ytRowWarning_${i}" class="text-[11px] text-red-500 mt-1 ${invalidMark?'':'hidden'}"><i class="fa-solid fa-triangle-exclamation"></i> Belum dikenali sebagai link YouTube yang valid \u2014 cek lagi link-nya.</div>
+      </div>
       <input class="inp w-28" placeholder="Judul (opsional)" value="${escapeHtml(v.title||'')}" oninput="window._ytDraft[${i}].title=this.value">
       <button onclick="removeYtVideoRow(${i})" class="icon-btn text-red-500"><i class="fa-solid fa-trash"></i></button>
-    </div>`).join('') || `<div class="text-xs text-zinc-400">Belum ada video ditambahkan.</div>`;
+    </div>`;
+  }).join('') || `<div class="text-xs text-zinc-400">Belum ada video ditambahkan.</div>`;
   renderYtPreview();
+}
+/* Menyalakan/mematikan tanda merah di bawah 1 baris saja saat admin mengetik,
+   TANPA menggambar ulang seluruh daftar (yang akan membuat kursor pindah /
+   fokus hilang setiap kali admin mengetik satu huruf). */
+function updateYtRowWarning(i){
+  const v = (window._ytDraft||[])[i]; if(!v) return;
+  const hasUrl = !!(v.url && v.url.trim());
+  const invalidMark = hasUrl && !extractYoutubeId(v.url);
+  const warnEl = document.getElementById('ytRowWarning_'+i);
+  const inputEl = warnEl && warnEl.previousElementSibling;
+  if(warnEl) warnEl.classList.toggle('hidden', !invalidMark);
+  if(inputEl) inputEl.classList.toggle('border-red-400', invalidMark);
 }
 /* Pratinjau langsung di halaman Pengaturan, supaya admin langsung melihat
    video akan tampil seperti apa di halaman utama begitu link dimasukkan. */
@@ -3629,14 +3684,23 @@ function removeYtVideoRow(i){
 }
 function saveYoutubeSettings(){
   DB.settings.youtubeChannelUrl = document.getElementById('p_ytChannel').value.trim();
-  DB.settings.youtubeVideos = (window._ytDraft||[]).filter(v=>v.url && v.url.trim() && extractYoutubeId(v.url));
-  const invalid = (window._ytDraft||[]).filter(v=>v.url && v.url.trim() && !extractYoutubeId(v.url));
+  const draft = window._ytDraft || [];
+  const valid = draft.filter(v=>v.url && v.url.trim() && extractYoutubeId(v.url));
+  const invalid = draft.filter(v=>v.url && v.url.trim() && !extractYoutubeId(v.url));
+  DB.settings.youtubeVideos = valid.map(v=>({...v}));
   saveDB();
-  window._ytDraft = DB.settings.youtubeVideos.map(v=>({...v}));
+  /* PERBAIKAN UTAMA: dulu window._ytDraft ditimpa dengan HANYA video yang
+     valid setelah simpan -- jadi baris yang link-nya belum dikenali (mis.
+     karena karakter tersembunyi dari copy-paste HP) langsung LENYAP dari
+     form tanpa jejak, walau sebenarnya cuma "belum tersimpan", bukan
+     "salah total". Sekarang draft TIDAK disentuh -- video yang valid tetap
+     tersimpan & langsung tampil di halaman utama, sementara baris yang
+     belum valid tetap ada di form (ditandai merah oleh renderYtVideoRows)
+     supaya admin bisa memperbaikinya, bukan mengetik ulang dari nol. */
   renderYtVideoRows();
   addLog('Pengaturan','Memperbarui pengaturan channel & video YouTube');
   if(invalid.length){
-    Swal.fire({icon:'warning', title:'Sebagian link tidak valid', text:`${invalid.length} link dilewati karena bukan URL YouTube yang valid.`, confirmButtonColor:'#E1122F'});
+    Swal.fire({icon:'warning', title:'Sebagian link belum tersimpan', text:`${invalid.length} link belum dikenali sebagai URL YouTube yang valid, jadi belum ikut tersimpan (tapi TIDAK dihapus). Baris itu ditandai merah di bawah \u2014 coba hapus lalu tempel ulang link-nya, lalu klik Simpan lagi.`, confirmButtonColor:'#E1122F'});
   } else {
     Swal.fire({toast:true, position:'top-end', icon:'success', title:'Video & channel YouTube tersimpan \u2014 cek Beranda untuk melihatnya', showConfirmButton:false, timer:2200});
   }
