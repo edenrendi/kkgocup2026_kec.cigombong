@@ -439,7 +439,12 @@ async function updatePesertaToCloud_(pesertaArr, nomorRegistrasi){
    Ditunda kalau: sedang ada modal/formulir terbuka (supaya tidak menimpa
    apa yang sedang diketik admin), atau sedang ada pengiriman data yang
    masih tertunda (supaya perubahan lokal tidak keburu tertimpa data lama). */
-const CLOUD_PULL_INTERVAL_MS = 45000;
+const CLOUD_PULL_INTERVAL_MS = 10000; /* PERBAIKAN: dulu 45 detik -> perubahan admin (mis. ubah
+  jumlah/nama Gugus) baru terlihat oleh peserta lain setelah puluhan detik s/d beberapa menit,
+  terutama kalau layar peserta sedang tidak aktif/dibackground (throttle browser) lalu baru
+  tertangkap saat tab kembali fokus. 10 detik memberi rasa "hampir realtime" tanpa membebani
+  kuota eksekusi Apps Script secara berlebihan (lihat juga perbaikan rerenderCurrentView()
+  di bawah, supaya hasil tarikan tiap 10 detik ini benar-benar dipakai memperbarui layar). */
 function isModalOpen_(){
   const el = document.getElementById('modalRoot');
   return !!(el && el.innerHTML.trim() !== '');
@@ -481,8 +486,32 @@ function rerenderCurrentView(){
       navigate(activeId);
     }else if(!hasClass_('landingScreen','hidden')){
       renderLanding();
+    }else if(!hasClass_('registerScreen','hidden')){
+      /* PERBAIKAN: sebelumnya tarikan data latar belakang (autoPullIfSafe_,
+         tiap CLOUD_PULL_INTERVAL_MS) MEMPERBARUI DB di memori tapi TIDAK
+         menyentuh layar sama sekali kalau peserta sedang berada di layar
+         Formulir Pendaftaran (registerScreen) -- karena rerenderCurrentView()
+         dulu hanya menangani layar Beranda (landingScreen) & panel admin.
+         Akibatnya pilihan Gugus (dropdown #r_gugus, diisi 1x saat formulir
+         dibuka lewat prepRegisterForm) tetap menampilkan daftar Gugus LAMA
+         sampai peserta menutup/refresh browser secara manual -- persis
+         keluhan "peserta masih baca Gugus 1-4 walau admin sudah ubah jadi 8
+         Gugus, baru ke-update setelah refresh manual beberapa menit
+         kemudian". Di sini kita HANYA menyegarkan daftar pilihan Gugus di
+         dropdown (bukan reset seluruh formulir dengan prepRegisterForm(),
+         supaya nama/foto pemain yang sedang diisi peserta tidak ikut hilang
+         tertimpa), sambil mempertahankan pilihan yang sudah dipilih peserta
+         kalau nama Gugus itu masih ada di daftar terbaru. */
+      refreshRegisterGugusOptions_();
     }
   }catch(e){ /* abaikan error re-render, data tetap tersimpan */ }
+}
+function refreshRegisterGugusOptions_(){
+  const sel = document.getElementById('r_gugus');
+  if(!sel) return;
+  const current = sel.value;
+  sel.innerHTML = `<option value="" disabled ${current?'':'selected'} hidden>\u2014 Pilih Gugus \u2014</option>` + DB.gugus.map(g=>`<option ${g===current?'selected':''}>${escapeHtml(g)}</option>`).join('');
+  if(current && !DB.gugus.includes(current)) sel.value = '';
 }
 
 /* ---------- Screen Router (public screens) ---------- */
@@ -493,6 +522,7 @@ function showScreen(id){
   /* Pastikan panel admin (#app) selalu tersembunyi saat berpindah ke layar publik,
      supaya tidak ada 2 tampilan (mis. Bagan) yang tumpang tindih di layar. */
   document.getElementById('app').classList.add('hidden');
+  if(id!=='landingScreen' && window._publicJadwalLiveTimer){ clearInterval(window._publicJadwalLiveTimer); window._publicJadwalLiveTimer=null; }
   if(id==='landingScreen') renderLanding();
   if(id==='registerScreen') prepRegisterForm();
   window.scrollTo(0,0);
@@ -583,10 +613,22 @@ function renderLanding(){
       <div class="font-display font-bold text-lg">${s[1]}</div>
       <div class="text-[11px] text-zinc-400">${s[2]}</div>
     </div>`).join('');
+  /* PERBAIKAN: dulu publicPanel selalu dikosongkan tiap renderLanding() dipanggil
+     -- termasuk saat dipanggil ULANG secara otomatis di latar belakang oleh
+     rerenderCurrentView() (tiap tarikan data cloud, lihat CLOUD_PULL_INTERVAL_MS).
+     Akibatnya kalau peserta sedang membuka "Bagan Pertandingan" atau "Hasil &
+     Klasemen" untuk memantau jalannya turnamen, tampilannya tiba-tiba KOSONG tiap
+     ~10-45 detik lalu harus diklik ulang -- padahal tujuan fitur ini justru supaya
+     peserta bisa memantau tanpa perlu klik berulang. window._publicPanelMode
+     mencatat panel mana yang sedang dibuka peserta, supaya di sini kita bisa
+     merender ULANG panel yang sama (dengan data terbaru) alih-alih membiarkannya
+     kosong. */
   document.getElementById('publicPanel').innerHTML = '';
   renderLandingYoutube();
   renderLandingWa();
   renderLandingPendaftaranInfo();
+  if(window._publicPanelMode==='bagan') renderPublicBagan();
+  else if(window._publicPanelMode==='hasil') renderPublicHasil();
 }
 function renderLandingYoutube(){
   const sec = document.getElementById('landingYoutubeSection');
@@ -696,12 +738,92 @@ function tickOne(targetIso, prefix, boxId, gridId, closedMsg){
   set(prefix+'_D', d); set(prefix+'_H', h); set(prefix+'_M', m); set(prefix+'_S', ss);
 }
 function renderPublicBagan(){
-  document.getElementById('publicPanel').innerHTML = `<div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
-    <div class="flex justify-end mb-3 no-print"><button onclick="printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-print"></i> Cetak / Unduh PDF</button></div>
-    <div id="publicBaganBox"></div></div>`;
+  window._publicPanelMode = 'bagan';
+  /* Bagan (bracket) & Jadwal Pertandingan ditampilkan berdampingan supaya
+     peserta bisa langsung memantau jalannya turnamen: lihat posisi tim di
+     bagan SEKALIGUS jam mainnya, tanpa harus berpindah halaman. Di layar
+     sempit (HP), jadwal otomatis pindah ke bawah bagan (grid-cols-1). */
+  document.getElementById('publicPanel').innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+    <div class="lg:col-span-3 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
+      <div class="flex justify-end mb-3 no-print"><button onclick="printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-print"></i> Cetak / Unduh PDF</button></div>
+      <div id="publicBaganBox"></div>
+    </div>
+    <div class="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 no-print">
+      <div class="flex items-center justify-between mb-1">
+        <div class="font-display font-semibold text-sm"><i class="fa-solid fa-calendar-days text-primary mr-1.5"></i>Jadwal Pertandingan</div>
+        <span id="publicJadwalLiveDot" class="hidden items-center gap-1 text-[10px] font-bold text-red-500"><span class="jdw-live-dot"></span> LIVE</span>
+      </div>
+      <div class="text-[11px] text-zinc-400 mb-3">Pertandingan yang sedang berlangsung ditandai merah menyala.</div>
+      <div id="publicJadwalRingkas" class="space-y-2 max-h-[560px] overflow-y-auto pr-1"></div>
+    </div>
+  </div>`;
   drawBagan('publicBaganBox', false);
+  renderPublicJadwalRingkas_();
+  if(window._publicJadwalLiveTimer) clearInterval(window._publicJadwalLiveTimer);
+  /* Disegarkan tiap 20 detik supaya highlight "sedang bertanding" otomatis
+     berpindah begitu jamnya lewat, tanpa peserta perlu refresh halaman. */
+  window._publicJadwalLiveTimer = setInterval(renderPublicJadwalRingkas_, 20000);
+}
+/* ---------- Jadwal ringkas (publik, di sebelah Bagan) ----------
+   Menentukan apakah sebuah PARTAI sedang berlangsung SEKARANG, berdasarkan:
+   1) status 'Sedang Main' yang diset otomatis begitu admin mulai mengisi
+      skor (lihat simpanSkor ~ l.status='Sedang Main'), ATAU
+   2) jam yang dijadwalkan admin (tanggal = hari ini & waktu sekarang berada
+      di antara jam mulai Main pertama s/d jam selesai Main terakhir Partai
+      itu) -- supaya peserta tetap bisa memantau "partai mana yang sedang
+      jalan" dari jadwal, sekalipun admin belum sempat klik input skor. */
+function isPartaiLiveNow_(l){
+  if(l.status==='Sedang Main') return true;
+  if(l.status==='Selesai') return false;
+  if(!l.tanggal || l.tanggal!==todayISO() || !l.jam) return false;
+  const items = (l.partai&&l.partai.length) ? l.partai : [null];
+  const n = items.length;
+  const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
+  const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+  const selesai = addMinutesToTime(l.jam, (n-1)*spacing + durasiMain);
+  const now = nowTime();
+  return now>=l.jam && now<=selesai;
+}
+function buildPublicJadwalListHTML_(){
+  const rows = DB.laga.slice().sort((a,b)=> jadwalSortKey(a)-jadwalSortKey(b));
+  if(!rows.length) return emptyState('fa-calendar-days','Belum ada jadwal','Jadwal akan tampil di sini setelah admin membuat Bagan & mengatur jadwal pertandingan.');
+  return rows.map(l=>{
+    const pk = partaiKe(l);
+    const live = isPartaiLiveNow_(l);
+    const items = (l.partai&&l.partai.length) ? l.partai : [null];
+    const n = items.length;
+    const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
+    const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+    const jamRange = l.jam ? `${l.jam}\u2013${addMinutesToTime(l.jam, (n-1)*spacing + durasiMain)}` : 'Jam belum diatur';
+    const statusBadge = live
+      ? `<span class="shrink-0 badge bg-red-500/90 text-white text-[10px] font-bold"><i class="fa-solid fa-circle-play mr-1"></i>Sedang Main</span>`
+      : `<span class="shrink-0 badge text-[10px] ${l.status==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}">${escapeHtml(l.status||'Terjadwal')}</span>`;
+    return `<div class="jdw-ring-row ${live?'jdw-live-pulse':''} flex items-center justify-between gap-3 p-3 rounded-xl border ${live?'border-red-400/70':'border-zinc-100 dark:border-zinc-800'}">
+      <div class="min-w-0">
+        <div class="text-[10px] uppercase tracking-wide text-zinc-400 font-semibold truncate">${escapeHtml(l.ronde||'')}${pk?` \u00B7 Partai ${pk}`:''}${l.lapangan?` \u00B7 Lap. ${escapeHtml(String(l.lapangan))}`:''}</div>
+        <div class="text-sm font-bold truncate">${escapeHtml(teamNama(l.teamA))} <span class="text-zinc-400 font-normal">vs</span> ${escapeHtml(teamNama(l.teamB))}</div>
+        <div class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">${l.tanggal?fmtDate(l.tanggal):'Tanggal belum diatur'} \u00B7 ${jamRange}</div>
+      </div>
+      ${statusBadge}
+    </div>`;
+  }).join('');
+}
+function renderPublicJadwalRingkas_(){
+  const box = document.getElementById('publicJadwalRingkas');
+  if(!box){
+    /* Panel sudah ditutup/diganti (mis. peserta pindah ke "Hasil & Klasemen") --
+       hentikan timer supaya tidak terus jalan sia-sia di latar belakang. */
+    if(window._publicJadwalLiveTimer){ clearInterval(window._publicJadwalLiveTimer); window._publicJadwalLiveTimer=null; }
+    return;
+  }
+  box.innerHTML = buildPublicJadwalListHTML_();
+  const anyLive = DB.laga.some(isPartaiLiveNow_);
+  const dot = document.getElementById('publicJadwalLiveDot');
+  if(dot) dot.classList.toggle('hidden', !anyLive);
 }
 function renderPublicHasil(){
+  window._publicPanelMode = 'hasil';
+  if(window._publicJadwalLiveTimer){ clearInterval(window._publicJadwalLiveTimer); window._publicJadwalLiveTimer=null; }
   const rows = DB.laga.filter(l=>l.status==='Selesai');
   document.getElementById('publicPanel').innerHTML = `<div class="bg-white dark:bg-zinc-900 rounded-xl2 shadow-softer border border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-50 dark:divide-zinc-800">
     ${rows.map(l=>`<div class="p-4 flex items-center justify-between text-sm">
@@ -1297,6 +1419,7 @@ function renderBranding(){
 const MENU = [
   {id:'dashboard', label:'Dashboard', icon:'fa-gauge-high'},
   {id:'peserta', label:'Peserta', icon:'fa-user-group', roles:['admin']},
+  {id:'undian', label:'Undian', icon:'fa-dice', roles:['admin']},
   {id:'team', label:'Team', icon:'fa-people-group', roles:['admin']},
   {id:'pemain', label:'Pemain', icon:'fa-shuttlecock', roles:['admin']},
   {id:'jadwal', label:'Jadwal', icon:'fa-calendar-days'},
@@ -1335,7 +1458,7 @@ function navigate(id){
   const allowed = MENU.filter(m=>!m.roles||m.roles.includes(currentUser.role)).map(m=>m.id);
   if(!allowed.includes(id)) id='dashboard';
   setActiveNav(id);
-  const renderers = { dashboard:renderDashboard, peserta:renderPeserta, team:renderTeam, pemain:renderPemain, jadwal:renderJadwal, bagan:renderBaganPage, skor:renderSkor, hasil:renderHasil, laporan:renderLaporan, backup:renderBackup, user:renderUserMgmt, pengaturan:renderPengaturan };
+  const renderers = { dashboard:renderDashboard, peserta:renderPeserta, undian:renderUndian, team:renderTeam, pemain:renderPemain, jadwal:renderJadwal, bagan:renderBaganPage, skor:renderSkor, hasil:renderHasil, laporan:renderLaporan, backup:renderBackup, user:renderUserMgmt, pengaturan:renderPengaturan };
   (renderers[id]||renderDashboard)();
   window.scrollTo({top:0, behavior:'smooth'});
 }
@@ -1808,6 +1931,213 @@ function verifySemuaGugus(gugus){
 }
 
 /* ---------- TEAM ---------- */
+/* ---------- UNDIAN (roda putar penentu Gugus per Slot Team A-H) ----------
+   Menggantikan langkah manual "pilih Gugus" satu-satu di kartu Team. Admin
+   memutar roda untuk tiap Slot (A, B, C, ... sesuai urutan slotKey Team yang
+   sudah ada); hasilnya LANGSUNG dipanggil lewat assignGugusToTeam() -- fungsi
+   yang sama yang sudah dipakai kartu Team -- sehingga otomatis: mengisi
+   team.gugus, menyusun ulang peserta ke Team terkait (resyncPesertaTeamLinks),
+   menyimpan (saveDB -> tersinkron ke cloud), dan tercatat di Log Aktivitas.
+   Admin TIDAK perlu lagi input manual Gugus di menu Team.
+   State (Gugus mana yang sudah/belum diundi, Slot mana yang sudah terisi)
+   SENGAJA tidak disimpan terpisah -- selalu dihitung ulang dari DB.gugus &
+   DB.teams[].gugus setiap halaman dibuka (undianComputeState_), supaya kalau
+   ada perubahan dari perangkat lain (mis. admin lain menghapus/menambah
+   Gugus di Pengaturan) datanya selalu konsisten, tanpa risiko data ganda. */
+window._undian = { candidates:[], angle:0, spinning:false, pendingIdx:-1, audioCtx:null };
+function undianComputeState_(){
+  const teamsWithSlot = DB.teams.filter(t=>t.slotKey).slice().sort((a,b)=>a.slotKey.localeCompare(b.slotKey));
+  const assigned = new Set(teamsWithSlot.filter(t=>t.gugus).map(t=>t.gugus));
+  const candidates = DB.gugus.filter(g=>!assigned.has(g));
+  const nextTeam = teamsWithSlot.find(t=>!t.gugus) || null;
+  return { teamsWithSlot, candidates, nextTeam };
+}
+function renderUndian(){
+  const { teamsWithSlot, candidates, nextTeam } = undianComputeState_();
+  window._undian.candidates = candidates.slice();
+  window._undian.angle = 0;
+  window._undian.spinning = false;
+  window._undian.pendingIdx = -1;
+  document.getElementById('mainContent').innerHTML = `
+    ${pageHeader('Undian Gugus','Putar roda untuk menentukan Gugus di tiap Slot Team \u2014 hasilnya otomatis masuk ke menu Team, tidak perlu input manual lagi.', teamsWithSlot.some(t=>t.gugus)?`<button onclick="undianReset_()" class="btn-ghost text-red-500 no-print"><i class="fa-solid fa-rotate-left"></i> Undi Ulang Semua</button>`:'')}
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
+        <h3 class="font-display font-bold text-sm mb-1"><i class="fa-solid fa-list-ol text-primary mr-1"></i> Gugus Menunggu Diundi</h3>
+        <p class="text-[11px] text-zinc-400 mb-3">Daftar Gugus diambil otomatis dari Pengaturan &rarr; Master Gugus.</p>
+        <ul id="undianCandidateList" class="space-y-1.5 max-h-[420px] overflow-y-auto"></ul>
+      </div>
+      <div class="undian-wheel-wrap">
+        <div class="undian-pointer"></div>
+        <canvas id="undianWheel" width="420" height="420"></canvas>
+        <button class="undian-spin-btn" id="undianSpinBtn" onclick="undianSpin_()">PUTAR<br>RODA</button>
+        <div class="undian-winner-modal" id="undianWinnerModal">
+          <h4 id="undianSlotTitleText">HASIL UNDIAN:</h4>
+          <div class="undian-winner-name" id="undianWinnerNameText"></div>
+          <button class="continue-btn btn-primary" style="border-radius:8px" onclick="undianContinue_()">LANJUTKAN</button>
+        </div>
+        <div id="undianStatusText" class="text-xs text-zinc-500 dark:text-zinc-400 mt-4 text-center max-w-xs"></div>
+      </div>
+      <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
+        <h3 class="font-display font-bold text-sm mb-1"><i class="fa-solid fa-trophy text-primary mr-1"></i> Hasil Undian per Slot</h3>
+        <p class="text-[11px] text-zinc-400 mb-3">Otomatis tersimpan ke kartu Team masing-masing slot.</p>
+        <div id="undianSlotContainer"></div>
+      </div>
+    </div>`;
+  undianRenderCandidateList_();
+  undianRenderSlots_();
+  undianUpdateStatusText_();
+  undianInitCanvas_();
+  undianDrawWheel_();
+}
+function undianRenderCandidateList_(){
+  const ul = document.getElementById('undianCandidateList'); if(!ul) return;
+  const list = window._undian.candidates;
+  ul.innerHTML = list.length ? list.map(g=>`<li class="text-xs bg-zinc-50 dark:bg-zinc-800/60 rounded-lg px-3 py-2 font-medium">${escapeHtml(g)}</li>`).join('') : `<li class="text-xs text-zinc-400 px-1 py-2">Semua Gugus sudah mendapat Slot.</li>`;
+}
+function undianRenderSlots_(){
+  const box = document.getElementById('undianSlotContainer'); if(!box) return;
+  const { teamsWithSlot, nextTeam } = undianComputeState_();
+  box.innerHTML = teamsWithSlot.map(t=>`<div class="undian-slot-item ${t.gugus?'filled':''} ${(!t.gugus && nextTeam && nextTeam.id===t.id)?'next':''}"><span>SLOT ${t.slotKey}</span><span>${t.gugus?escapeHtml(t.gugus):'\u2014'}</span></div>`).join('') || `<div class="text-xs text-zinc-400">Belum ada Team dengan Slot. Tambahkan Team terlebih dahulu.</div>`;
+}
+function undianUpdateStatusText_(){
+  const el = document.getElementById('undianStatusText'); if(!el) return;
+  const { candidates, nextTeam } = undianComputeState_();
+  const btn = document.getElementById('undianSpinBtn');
+  if(!nextTeam){
+    el.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-500 mr-1"></i> Semua Slot sudah terisi.';
+    if(btn) btn.disabled = true;
+  }else if(!candidates.length){
+    el.innerHTML = `Menunggu Slot <b>${nextTeam.slotKey}</b> \u2014 tambahkan Gugus di Pengaturan terlebih dahulu.`;
+    if(btn) btn.disabled = true;
+  }else{
+    el.innerHTML = `Putar untuk menentukan Gugus di <b>SLOT ${nextTeam.slotKey}</b> (${candidates.length} Gugus tersisa)`;
+    if(btn) btn.disabled = false;
+  }
+}
+function undianInitCanvas_(){
+  const canvas = document.getElementById('undianWheel');
+  if(!canvas) return;
+  window._undian.canvas = canvas;
+  window._undian.ctx = canvas.getContext('2d');
+  if(!window._undian.audioCtx){
+    try{ window._undian.audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ /* abaikan, tetap bisa dipakai tanpa suara klik */ }
+  }
+}
+function undianPlayClick_(){
+  const actx = window._undian.audioCtx; if(!actx) return;
+  try{
+    if(actx.state==='suspended') actx.resume();
+    const osc = actx.createOscillator(), gain = actx.createGain();
+    osc.type='triangle'; osc.frequency.setValueAtTime(300, actx.currentTime); osc.frequency.exponentialRampToValueAtTime(100, actx.currentTime+0.04);
+    gain.gain.setValueAtTime(0.3, actx.currentTime); gain.gain.linearRampToValueAtTime(0.01, actx.currentTime+0.04);
+    osc.connect(gain); gain.connect(actx.destination); osc.start(); osc.stop(actx.currentTime+0.04);
+  }catch(e){ /* abaikan */ }
+}
+function undianSpeak_(text){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.lang='id-ID'; u.rate=0.95; u.pitch=1.0;
+    window.speechSynthesis.speak(u);
+  }catch(e){ /* abaikan */ }
+}
+const UNDIAN_COLORS = ['#E1122F','#2563EB','#059669','#D97706','#7C3AED','#0891B2','#DB2777','#475569'];
+function undianDrawWheel_(){
+  const { ctx, canvas } = window._undian; if(!ctx||!canvas) return;
+  const list = window._undian.candidates;
+  const center = canvas.width/2;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(!list.length){
+    ctx.fillStyle='#E4E4E7'; ctx.beginPath(); ctx.arc(center,center,center-8,0,2*Math.PI); ctx.fill();
+    return;
+  }
+  const anglePer = (2*Math.PI)/list.length;
+  list.forEach((g,i)=>{
+    const angle = window._undian.angle + i*anglePer;
+    ctx.beginPath(); ctx.moveTo(center,center); ctx.arc(center,center,center-8,angle,angle+anglePer); ctx.closePath();
+    ctx.fillStyle = UNDIAN_COLORS[i%UNDIAN_COLORS.length]; ctx.fill();
+    ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
+    ctx.save(); ctx.translate(center,center); ctx.rotate(angle+anglePer/2); ctx.textAlign='right'; ctx.fillStyle='#fff'; ctx.font='bold 13px sans-serif';
+    ctx.fillText(g.length>16?g.slice(0,15)+'\u2026':g, center-16, 4); ctx.restore();
+  });
+  ctx.beginPath(); ctx.arc(center,center,40,0,2*Math.PI); ctx.fillStyle='rgba(0,0,0,.15)'; ctx.fill();
+}
+function undianSpin_(){
+  const st = window._undian;
+  if(st.spinning) return;
+  const { candidates, nextTeam } = undianComputeState_();
+  if(!nextTeam){ Swal.fire({icon:'info', title:'Semua Slot sudah terisi', confirmButtonColor:'#2563EB'}); return; }
+  if(!candidates.length){ Swal.fire({icon:'warning', title:'Gugus sudah habis', text:'Tambahkan Gugus lagi di Pengaturan untuk mengisi slot yang tersisa.', confirmButtonColor:'#2563EB'}); return; }
+  st.candidates = candidates;
+  st.spinning = true;
+  const btn = document.getElementById('undianSpinBtn'); if(btn) btn.disabled = true;
+  const n = st.candidates.length;
+  const anglePer = (2*Math.PI)/n;
+  const extraRounds = Math.floor(Math.random()*3)+10;
+  const randomTarget = Math.random()*360;
+  const totalDeg = (extraRounds*360)+randomTarget;
+  const duration = 7000;
+  const start = performance.now();
+  const startAngle = st.angle;
+  let lastSeg = -1;
+  function ease(t){ return 1-Math.pow(1-t,4); }
+  function step(time){
+    if(!document.getElementById('undianWheel')){ st.spinning=false; return; } /* halaman sudah ditinggalkan */
+    const elapsed = time-start;
+    const progress = Math.min(elapsed/duration,1);
+    st.angle = startAngle + (totalDeg*Math.PI/180)*ease(progress);
+    undianDrawWheel_();
+    let norm = (1.5*Math.PI - (st.angle % (2*Math.PI))) % (2*Math.PI);
+    if(norm<0) norm += 2*Math.PI;
+    const seg = Math.floor(norm/anglePer);
+    if(seg!==lastSeg){ undianPlayClick_(); lastSeg=seg; }
+    if(progress<1) requestAnimationFrame(step);
+    else undianShowWinner_(seg, nextTeam);
+  }
+  requestAnimationFrame(step);
+}
+function undianShowWinner_(winningIndex, nextTeam){
+  const st = window._undian;
+  st.pendingIdx = winningIndex;
+  const gugus = st.candidates[winningIndex];
+  undianSpeak_(`Slot ${nextTeam.slotKey} diisi oleh Gugus ${gugus}`);
+  const titleEl = document.getElementById('undianSlotTitleText');
+  const nameEl = document.getElementById('undianWinnerNameText');
+  const modal = document.getElementById('undianWinnerModal');
+  if(titleEl) titleEl.textContent = `HASIL UNTUK SLOT ${nextTeam.slotKey}:`;
+  if(nameEl) nameEl.textContent = gugus;
+  if(modal) modal.style.display = 'block';
+}
+function undianContinue_(){
+  const st = window._undian;
+  if(st.pendingIdx===-1) return;
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  const gugus = st.candidates[st.pendingIdx];
+  const { nextTeam } = undianComputeState_();
+  st.pendingIdx = -1;
+  st.spinning = false;
+  const modal = document.getElementById('undianWinnerModal'); if(modal) modal.style.display='none';
+  if(nextTeam && gugus){
+    /* assignGugusToTeam sudah menangani semuanya: isi team.gugus, tautkan
+       peserta gugus tsb ke Team ini, saveDB (sinkron cloud), catat Log,
+       dan render ulang menu Team kalau sedang dibuka -- di sini kita cukup
+       memanggilnya lalu me-render ulang halaman Undian saja. */
+    assignGugusToTeam(nextTeam.id, gugus);
+  }
+  if(!document.getElementById('undianWheel')) return; /* sudah pindah halaman */
+  renderUndian();
+}
+function undianReset_(){
+  const { teamsWithSlot } = undianComputeState_();
+  const filled = teamsWithSlot.filter(t=>t.gugus);
+  if(!filled.length) return;
+  Swal.fire({icon:'warning', title:'Undi ulang semua Slot?', text:'Semua hasil undian yang sudah ada akan dikosongkan (Team & peserta yang tertaut akan ikut terlepas dari Slot-nya). Tindakan ini tidak bisa dibatalkan.', showCancelButton:true, confirmButtonColor:'#E1122F', cancelButtonColor:'#94A3B8', confirmButtonText:'Ya, Undi Ulang'}).then(r=>{
+    if(!r.isConfirmed) return;
+    filled.forEach(t=>assignGugusToTeam(t.id, ''));
+    addLog('Undian','Mereset seluruh hasil undian Gugus per Slot');
+    renderUndian();
+  });
+}
 function renderTeam(){
   document.getElementById('mainContent').innerHTML = `
     ${pageHeader('Team','Kelola 8 tim peserta turnamen \u2014 pilih Gugus di tiap slot untuk mengganti nama Team secara otomatis', isAdmin()?`<button onclick="formTeam()" class="btn-primary"><i class="fa-solid fa-plus"></i> Tambah Team</button>`:'')}
@@ -1946,7 +2276,14 @@ function assignGugusToTeam(teamId, gugusName){
   addLog('Team', gugusName ? `${teamSlotName(team)} ditetapkan sebagai GUGUS ${gugusName.toUpperCase()}` : `Mengosongkan gugus pada ${teamSlotName(team)}`);
   syncToGoogleSheet('TEAM','update',team);
   if(other) syncToGoogleSheet('TEAM','update',other);
-  renderTeam();
+  /* PERBAIKAN: assignGugusToTeam() sekarang juga dipanggil dari menu Undian
+     (undianContinue_/undianReset_), yang punya tampilan sendiri di
+     #mainContent. Dulu baris ini SELALU memanggil renderTeam() tanpa syarat,
+     jadi kalau dipanggil dari halaman Undian, layar Undian yang sedang
+     dilihat admin langsung tertimpa/ganti ke halaman Team. Sekarang hanya
+     me-render ulang halaman Team kalau memang halaman Team yang sedang
+     aktif; halaman Undian me-render ulang dirinya sendiri secara terpisah. */
+  if(!document.getElementById('undianWheel')) renderTeam();
   Swal.fire({toast:true, position:'top-end', icon:'success', title: gugusName ? `${teamSlotName(team)} \u2192 GUGUS ${gugusName.toUpperCase()}` : `${teamSlotName(team)} dikosongkan`, showConfirmButton:false, timer:1800});
 }
 
@@ -3984,6 +4321,21 @@ styleTag.textContent = `
   .btn-ghost:hover{background:#FAFAFA}
   .icon-btn{width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
   .icon-btn:hover{background:#F4F4F5}
+
+  /* ---------- Menu Undian (roda putar penentu Gugus per Slot) ---------- */
+  .undian-wheel-wrap{position:relative;display:flex;flex-direction:column;align-items:center}
+  .undian-pointer{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:16px solid transparent;border-right:16px solid transparent;border-top:28px solid #E1122F;z-index:10}
+  #undianWheel{border-radius:50%;box-shadow:0 6px 18px rgba(0,0,0,.22);background:#fff;max-width:100%;height:auto}
+  .undian-spin-btn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:84px;height:84px;border-radius:50%;font-size:12.5px;font-weight:800;color:#fff;background:linear-gradient(145deg,#2563EB,#1E3A8A);border:4px solid #fff;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.3);z-index:5;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.15;padding:4px}
+  .undian-spin-btn:disabled{background:#bdc3c7;cursor:not-allowed}
+  .undian-winner-modal{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(15,23,42,.96);color:#fff;padding:22px 26px;border-radius:16px;box-shadow:0 10px 28px rgba(0,0,0,.5);text-align:center;z-index:20;width:88%;max-width:300px;border:3px solid #f1c40f}
+  .undian-winner-modal h4{margin:0 0 8px;font-size:13px;color:#f1c40f;letter-spacing:.5px}
+  .undian-winner-modal .undian-winner-name{font-size:20px;font-weight:800;margin-bottom:14px;word-wrap:break-word;line-height:1.3}
+  .undian-slot-item{background:#F8FAFC;margin-bottom:8px;padding:9px 12px;border-radius:8px;border-left:4px solid #CBD5E1;font-size:13px;font-weight:600;display:flex;justify-content:space-between;gap:8px}
+  .dark .undian-slot-item{background:#27272A}
+  .undian-slot-item.filled{border-left-color:#059669;background:#ECFDF5}
+  .dark .undian-slot-item.filled{background:rgba(5,150,105,.15)}
+  .undian-slot-item.next{border-left-color:#E1122F;box-shadow:0 0 0 2px rgba(225,18,47,.15)}
 `;
 document.head.appendChild(styleTag);
 
