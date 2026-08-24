@@ -259,6 +259,25 @@ function updateCloudStatusUI(){
 }
 function scheduleCloudPush(){
   if(!cloudSyncEnabled()) return;
+  /* PERBAIKAN BUG UTAMA "data kembali ke awal": aksi 'savedb' di Code.gs
+     MENIMPA SELURUH database di server dengan salinan DB yang ada di
+     perangkat ini. Salinan lokal itu hanya "difoto" satu kali (saat
+     halaman dibuka / tarikan terakhir), jadi kalau ADA peserta lain yang
+     mendaftar atau admin yang mengubah data dari perangkat lain di antara
+     saat itu dan saat 'savedb' ini terkirim, perubahan orang lain tsb IKUT
+     TERTIMPA/HILANG -- persis gejala "data balik ke awal lagi" setelah ada
+     yang input. Sekarang HANYA admin yang sedang login yang boleh memicu
+     pengiriman 'savedb' (mis. menyusun jadwal, mengubah skor, pengaturan).
+     Perubahan dari PENGUNJUNG PUBLIK yang belum login (pendaftaran peserta
+     baru, edit data sendiri) TIDAK lagi lewat jalur ini -- keduanya sudah
+     dikirim lewat endpoint atomik terpisah (registerpeserta / updatepeserta
+     di Code.gs) yang hanya menambah/mengubah baris miliknya sendiri di
+     server, di dalam kunci (lock), tanpa pernah menimpa data orang lain.
+     Ini juga berarti pendaftaran peserta TETAP masuk ke server sekalipun
+     admin sedang offline / keluar tab / laptopnya mati, karena permintaan
+     langsung dikirim dari perangkat peserta itu sendiri ke server -- bukan
+     dititipkan lewat perangkat admin. */
+  if(!isAdmin()) return;
   clearTimeout(_cloudPushTimer);
   _cloudPushTimer = setTimeout(pushDBToCloud, 1500);
 }
@@ -378,6 +397,32 @@ async function registerPesertaToCloud_(pesertaArr, linkedTeam, nomorRegistrasi){
         team: linkedTeam ? {id:linkedTeam.id, poin:linkedTeam.poin, statusPendaftaran:linkedTeam.statusPendaftaran} : null,
         nomorRegistrasi
       })
+    });
+    let json = null; try{ json = await res.json(); }catch(e){}
+    if(json && json.ok===false){
+      if(json.duplicateGugus) return {ok:false, duplicateGugus:true, reason:json.error};
+      throw new Error(json.error||'Gagal menyimpan ke server');
+    }
+    return {ok:true};
+  }catch(e){ return {ok:false, reason:e.message}; }
+}
+
+/* ---------- Kirim perbaikan data sendiri (peserta publik) LANGSUNG ke server
+   (atomik) ---- sama seperti registerPesertaToCloud_ di atas, tapi memanggil
+   endpoint 'updatepeserta': HANYA mengubah baris peserta yang id-nya cocok
+   di server, tidak menimpa seluruh database. Dipakai oleh
+   savePublicEditedRegistration() supaya peserta yang memperbaiki data
+   sendiri (mis. salah ketik nama/sekolah) tetap tersimpan ke server
+   sekalipun admin sedang offline, dan tidak menimpa pendaftaran/perubahan
+   orang lain yang terjadi hampir bersamaan. */
+async function updatePesertaToCloud_(pesertaArr, nomorRegistrasi){
+  const url = (DB && DB.settings && DB.settings.gasUrl) || resolvedGasUrl_();
+  if(!url) return {ok:false, reason:'URL Apps Script belum diatur di config.js'};
+  try{
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ action:'updatepeserta', peserta: pesertaArr, nomorRegistrasi })
     });
     let json = null; try{ json = await res.json(); }catch(e){}
     if(json && json.ok===false) throw new Error(json.error||'Gagal menyimpan ke server');
@@ -674,6 +719,42 @@ function prepRegisterForm(){
   window._regFilled = {};
   renderKategoriBox();
   const box = document.getElementById('r_pemainBox'); if(box) box.innerHTML = '';
+  resetGugusWarning_();
+}
+/* ---------- Cegah pendaftaran ganda per Gugus ----------
+   Satu Gugus hanya boleh didaftarkan SATU KALI (oleh satu koordinator).
+   Kalau Gugus yang dipilih sudah punya data peserta tersimpan (dan belum
+   ditolak admin), form pendaftaran diblokir dan pengguna diarahkan untuk
+   menghubungi admin atau memakai menu "Cek Status Pendaftaran" (perbaikan
+   data lewat verifikasi Nomor HP Koordinator) supaya tidak tercipta data
+   ganda/tumpang tindih untuk Gugus yang sama. */
+function gugusSudahTerdaftar_(gugus){
+  if(!gugus) return false;
+  return DB.peserta.some(p=> (p.gugus||'').trim().toLowerCase()===gugus.trim().toLowerCase() && p.status!=='Ditolak');
+}
+function resetGugusWarning_(){
+  const warn = document.getElementById('r_gugusWarning'); if(warn) warn.classList.add('hidden');
+  const submitBtn = document.querySelector('#regForm button[type="submit"]');
+  if(submitBtn){ submitBtn.disabled = false; submitBtn.classList.remove('opacity-40','cursor-not-allowed'); }
+}
+function checkGugusDuplikat(){
+  const gugus = document.getElementById('r_gugus').value;
+  const warn = document.getElementById('r_gugusWarning');
+  const submitBtn = document.querySelector('#regForm button[type="submit"]');
+  const waLink = document.getElementById('r_gugusWarningWa');
+  if(!warn) return false;
+  if(gugusSudahTerdaftar_(gugus)){
+    warn.classList.remove('hidden');
+    if(submitBtn){ submitBtn.disabled = true; submitBtn.classList.add('opacity-40','cursor-not-allowed'); }
+    if(waLink){
+      const num = (DB.settings && DB.settings.waNumber) ? waIntlNumber(DB.settings.waNumber) : '';
+      if(num){ waLink.href = `https://wa.me/${num}?text=${encodeURIComponent('Halo Admin, saya ingin bertanya soal pendaftaran Gugus '+gugus+' yang sepertinya sudah terdaftar.')}`; waLink.classList.remove('hidden'); }
+      else waLink.classList.add('hidden');
+    }
+    return true;
+  }
+  resetGugusWarning_();
+  return false;
 }
 /* Kotak daftar kategori \u2014 checkbox pilih kategori + tombol "Isi Data Pemain" per kategori.
    Setiap kategori diisi SATU PERSATU lewat modal, dengan tanda \u2713 setelah tersimpan. */
@@ -780,6 +861,11 @@ function submitRegister(e){
   const sekolahTim = document.getElementById('r_sekolah').value.trim();
   const hpKoordinator = document.getElementById('r_hp').value.trim();
   const gugus = document.getElementById('r_gugus').value;
+  if(gugusSudahTerdaftar_(gugus)){
+    Swal.fire({icon:'error', title:'Gugus Sudah Terdaftar', text:'Gugus ini sudah didaftarkan. Silahkan hubungi admin.', confirmButtonColor:'#E1122F'});
+    checkGugusDuplikat();
+    return false;
+  }
   const kategoriTerisi = KATEGORI.filter(k=>window._regPemain[k.id]);
   if(!kategoriTerisi.length){ Swal.fire({icon:'warning', title:'Pilih minimal satu kategori', text:'Centang kategori yang diikuti, lalu isi datanya terlebih dahulu.', confirmButtonColor:'#2563EB'}); return false; }
   const belumDiisi = kategoriTerisi.filter(k=>!window._regFilled[k.id]);
@@ -833,6 +919,22 @@ function submitRegister(e){
       if(r.ok){
         window._cloudStatus = {state:'success', lastSyncAt:new Date().toISOString(), lastError:null};
         showCloudSaveToast_(true);
+      }else if(r.duplicateGugus){
+        // Kasus langka: dua koordinator mendaftarkan Gugus yang sama nyaris
+        // bersamaan, keduanya lolos pengecekan di browser, tapi server (yang
+        // menerima permintaan lebih dulu, di dalam lock) sudah menyimpan
+        // salah satunya. Batalkan salinan lokal yang baru saja ditambahkan
+        // supaya data tidak "sukses" di HP ini padahal tidak tersimpan di
+        // server, lalu beri tahu penggunanya dengan jelas.
+        const idsBaru = pesertaBaru.map(p=>p.id);
+        DB.peserta = DB.peserta.filter(p=>!idsBaru.includes(p.id));
+        saveDB();
+        window._cloudStatus = {state:'error', lastSyncAt:window._cloudStatus.lastSyncAt, lastError:r.reason};
+        updateCloudStatusUI();
+        showScreen('registerScreen');
+        prepRegisterForm();
+        Swal.fire({icon:'error', title:'Gugus Sudah Terdaftar', text:'Gugus ini baru saja didaftarkan oleh orang lain. Silahkan hubungi admin.', confirmButtonColor:'#E1122F'});
+        return;
       }else{
         window._cloudStatus = {state:'error', lastSyncAt:window._cloudStatus.lastSyncAt, lastError:r.reason};
         showCloudSaveToast_(false, r.reason);
@@ -1058,13 +1160,24 @@ function savePublicEditedRegistration(e, kid){
     const namaInp = document.getElementById(`pe_nama_${i}`); if(namaInp) p.nama = namaInp.value.trim();
     const sekInp = document.getElementById(`pe_sekolah_${i}`); if(sekInp) p.asalSekolah = sekInp.value.trim();
     if(window._peEditFoto && window._peEditFoto[i]) p.foto = window._peEditFoto[i];
-    syncToGoogleSheet('PESERTA','update',p);
   });
   saveDB();
   addLog('Pendaftaran', 'Peserta memperbaiki data sendiri \u2014 '+((rows[0] && rows[0].nomorRegistrasi)||''));
   closeModal();
   Swal.fire({toast:true, position:'top-end', icon:'success', title:'Data berhasil diperbarui', showConfirmButton:false, timer:1800});
   const q = document.getElementById('checkQuery'); if(q){ q.value = hp; doPesertaCheck(); }
+  // PERBAIKAN: kirim perubahan ini LANGSUNG ke server lewat endpoint atomik
+  // 'updatepeserta' (hanya mengubah baris yang id-nya cocok, tidak menimpa
+  // seluruh database). Sebelumnya perbaikan data peserta hanya tersimpan di
+  // perangkat peserta itu sendiri sampai ADMIN membuka aplikasi dan memicu
+  // penyimpanan penuh -- yang berisiko malah menimpa balik dengan data lama
+  // kalau salinan lokal admin belum ter-refresh. Sekarang tersimpan ke
+  // server otomatis, sekalipun admin sedang offline/keluar tab.
+  if(cloudSyncEnabled()){
+    updatePesertaToCloud_(rows, (rows[0] && rows[0].nomorRegistrasi)||'').then(r=>{
+      if(!r.ok) showCloudSaveToast_(false, r.reason);
+    });
+  }
   return false;
 }
 
