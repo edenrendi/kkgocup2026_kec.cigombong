@@ -782,7 +782,7 @@ function renderPublicBagan(){
         </div>
       </div>
       <div class="public-panel-body">
-        <div class="text-[11px] text-zinc-400 mb-3 mt-2 no-print">Tiap Partai diberi warna berbeda; kategori yang sedang berlangsung menyala merah.</div>
+        <div class="text-[11px] text-zinc-400 mb-3 mt-2 no-print">Kategori yang sedang berlangsung ditandai LIVE merah, yang sudah selesai tampil hijau.</div>
         <div id="publicJadwalRingkas" class="max-h-[560px] overflow-auto pr-1 -mx-1 px-1"></div>
       </div>
     </div>
@@ -822,9 +822,12 @@ function previewBagan(){
     cancelButtonText:'Tutup'
   }).then(r=>{ if(r.isConfirmed) printBagan(); });
 }
-/* Pratinjau Jadwal Pertandingan SEBELUM diunduh -- memakai tabel Jadwal yang
-   sama (buildJadwalTableHTML) dengan yang tampil di layar & yang dicetak,
-   jadi isinya selalu konsisten & akurat. */
+/* Pratinjau Jadwal Pertandingan SEBELUM diunduh -- memakai tabel yang PERSIS
+   sama dengan hasil cetak/unduhan (forPrint=true, hitam-putih, tanpa kolom
+   Aksi) supaya yang dilihat peserta di pratinjau ini 100% sama dengan file
+   yang akan diunduh (tampilan RINGKAS di layar utama sengaja dibuat
+   berbeda/lebih sederhana -- lihat renderPublicJadwalRingkas_ -- supaya
+   tidak terpotong di HP; hanya versi UNDUH yang mengikuti format admin). */
 function previewJadwal(){
   if(!DB.laga.length){
     Swal.fire({icon:'info', title:'Jadwal belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu di menu Bagan sebelum melihat jadwal.', confirmButtonColor:'#2563EB'});
@@ -832,7 +835,7 @@ function previewJadwal(){
   }
   Swal.fire({
     title:'Pratinjau Jadwal Pertandingan',
-    html:`<div style="max-height:65vh;overflow:auto;border:1px solid #E4E4E7;border-radius:10px;padding:6px;background:#fff;text-align:left"><table class="w-full border-collapse text-[11px]" style="table-layout:fixed">${buildJadwalTableHTML(false,true)}</table></div>`,
+    html:`<div style="max-height:65vh;overflow:auto;border:1px solid #E4E4E7;border-radius:10px;padding:6px;background:#fff;text-align:left"><table class="w-full border-collapse" style="table-layout:fixed;font-size:9px">${buildJadwalTableHTML(true)}</table></div>`,
     width:760,
     confirmButtonText:'Unduh PDF',
     confirmButtonColor:'#2563EB',
@@ -848,9 +851,7 @@ function previewJadwal(){
       di antara jam mulai Main pertama s/d jam selesai Main terakhir Partai
       itu) -- supaya peserta tetap bisa memantau "partai mana yang sedang
       jalan" dari jadwal, sekalipun admin belum sempat klik input skor.
-   Dipakai untuk titik "LIVE" ringkasan di judul panel; highlight per-baris
-   kategori yang lebih presisi (per Main, bukan per Partai) dihitung
-   langsung di dalam buildJadwalTableHTML (parameter publicMode). */
+   Dipakai untuk titik "LIVE" ringkasan di judul panel & highlight kartu. */
 function isPartaiLiveNow_(l){
   if(l.status==='Sedang Main') return true;
   if(l.status==='Selesai') return false;
@@ -863,6 +864,30 @@ function isPartaiLiveNow_(l){
   const now = nowTime();
   return now>=l.jam && now<=selesai;
 }
+/* Apakah 1 MAIN (kategori) tertentu sudah pernah diisi skornya? Dipakai untuk
+   menandai kategori "Selesai" (hijau) di kartu ringkas publik. Meniru logika
+   "played" yang sama dengan mainSkorText, tanpa ikut membangun HTML skornya. */
+function mainSudahMain_(l, p){
+  if(!p) return false;
+  if((l.scoreMode||'SET_ALL')==='SCORE_42'){
+    const a=(p.score42&&p.score42[0])||0, b=(p.score42&&p.score42[1])||0;
+    return a>0 || b>0;
+  }
+  return (p.sets||[]).some(s=> s[0]>0 || s[1]>0);
+}
+/* ---------- Jadwal Pertandingan RINGKAS (tampilan publik di layar HP/desktop) ----------
+   SENGAJA dibuat berbeda & jauh lebih sederhana dari tabel Jadwal admin
+   (buildJadwalTableHTML): tabel admin punya banyak kolom sempit (Ronde,
+   Tanggal, Jam, Main Ke, Pertandingan, Kategori, Skor, Aksi) yang di layar
+   HP jadi terlalu lebar dan banyak terpotong/harus digeser-geser.
+   Di sini ditampilkan sebagai KARTU per Partai -- ringkas, tetap
+   menampilkan KATEGORI apa saja yang dipertandingkan (bukan cuma nama Team
+   seperti versi paling awal dulu) beserta status tiap kategori (belum
+   main / sedang LIVE / sudah selesai + skor ringkas), tapi tanpa detail
+   nama pemain & rincian jam per-Main seperti tabel admin. Format
+   admin/lengkap TETAP dipakai untuk hasil UNDUH (lihat previewJadwal &
+   printJadwal, keduanya memanggil buildJadwalTableHTML apa adanya) supaya
+   file yang diunduh peserta selalu identik dengan yang diunduh admin. */
 function renderPublicJadwalRingkas_(){
   const box = document.getElementById('publicJadwalRingkas');
   if(!box){
@@ -871,11 +896,47 @@ function renderPublicJadwalRingkas_(){
     if(window._publicJadwalLiveTimer){ clearInterval(window._publicJadwalLiveTimer); window._publicJadwalLiveTimer=null; }
     return;
   }
-  /* Memakai tabel Jadwal yang SAMA (buildJadwalTableHTML) dengan menu admin --
-     jadi kategori tiap Main, nama pemain, & skor ikut tampil (bukan cuma nama
-     Team) -- hanya ditambah mode publik (warna per Partai + highlight LIVE
-     per kategori) lewat parameter publicMode=true. */
-  box.innerHTML = `<table class="w-full border-collapse text-[11px]" style="table-layout:fixed">${buildJadwalTableHTML(false, true)}</table>`;
+  const rows = DB.laga.slice().sort((a,b)=> jadwalSortKey(a) - jadwalSortKey(b));
+  if(!rows.length){
+    box.innerHTML = emptyState('fa-calendar-days','Belum ada jadwal','Generate bagan terlebih dahulu di menu Bagan untuk membuat jadwal otomatis.');
+  } else {
+    let lastDate;
+    const cards = [];
+    rows.forEach(l=>{
+      if(l.tanggal !== lastDate){
+        lastDate = l.tanggal;
+        cards.push(`<div class="pjc-date-sep"><i class="fa-solid fa-calendar-day"></i> ${l.tanggal?fmtDateFull(l.tanggal):'Tanggal Belum Diatur'}</div>`);
+      }
+      const pk = partaiKe(l);
+      const items = (l.partai&&l.partai.length) ? l.partai : [null];
+      const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
+      const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+      const live = isPartaiLiveNow_(l);
+      const colorA = teamColor(l.teamA), colorB = teamColor(l.teamB);
+      const katChips = items.map((p,idx)=>{
+        if(!p) return '';
+        const mulai = l.jam ? addMinutesToTime(l.jam, idx*spacing) : null;
+        const isLiveMain = live && mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain);
+        const done = mainSudahMain_(l,p);
+        const stateCls = isLiveMain ? 'pjc-kat-live' : done ? 'pjc-kat-done' : 'pjc-kat-pending';
+        const scoreHtml = done ? mainSkorText(l,p) : (isLiveMain ? '<i class="fa-solid fa-shuttlecock"></i>' : (mulai||'-'));
+        return `<div class="pjc-kat-chip ${stateCls}"><span class="pjc-kat-name">${escapeHtml(kategoriNama(p.kategoriId))}</span><span class="pjc-kat-score">${scoreHtml}</span></div>`;
+      }).join('');
+      cards.push(`<div class="pjc-card${live?' pjc-live':''}">
+        <div class="pjc-top">
+          <span class="pjc-partai-badge">${l.ronde}${pk?` &middot; Partai ${pk}`:''}</span>
+          ${live?'<span class="pjc-live-badge"><span class="jdw-live-dot"></span> LIVE</span>':(l.jam?`<span class="pjc-jam"><i class="fa-regular fa-clock"></i> ${l.jam}</span>`:'')}
+        </div>
+        <div class="pjc-teams">
+          <div class="pjc-team"><span class="pjc-dot" style="background:${colorA}"></span><span class="pjc-team-name">${escapeHtml(teamNama(l.teamA))}</span></div>
+          <div class="pjc-vs">VS</div>
+          <div class="pjc-team pjc-team-b"><span class="pjc-team-name">${escapeHtml(teamNama(l.teamB))}</span><span class="pjc-dot" style="background:${colorB}"></span></div>
+        </div>
+        <div class="pjc-kategori-list">${katChips}</div>
+      </div>`);
+    });
+    box.innerHTML = `<div class="pjc-list">${cards.join('')}</div>`;
+  }
   const anyLive = DB.laga.some(isPartaiLiveNow_);
   const dot = document.getElementById('publicJadwalLiveDot');
   if(dot) dot.classList.toggle('hidden', !anyLive);
