@@ -469,10 +469,32 @@ function isModalOpen_(){
   const el = document.getElementById('modalRoot');
   return !!(el && el.innerHTML.trim() !== '');
 }
+function isTypingInField_(){
+  /* PERBAIKAN "kursor bergerak sendiri saat admin input": tarikan data
+     otomatis tiap beberapa detik (autoPullIfSafe_) menggambar ulang
+     tampilan (rerenderCurrentView) supaya layar selalu segar. Tapi kalau
+     pas admin lagi mengetik di kolom input BIASA di halaman -- bukan di
+     dalam modal popup, mis. langsung di baris tabel Jadwal/Peserta -- maka
+     dulu tarikan itu tetap jalan dan membangun ulang seluruh tabel,
+     TERMASUK kolom input yang sedang difokus itu. Elemen lamanya hilang
+     diganti elemen baru, jadi browser kehilangan jejak posisi kursor
+     (terlihat seperti "kursor lompat sendiri" atau isian ketikan meloncat
+     ke akhir/awal). Sekarang, sebelum menarik/menggambar ulang apa pun,
+     dicek dulu: kalau elemen yang sedang aktif/difokus itu kolom input,
+     textarea, select, atau area yang bisa diketik -- TUNDA tarikan kali
+     ini (dicoba lagi otomatis di giliran berikutnya). Begitu admin selesai
+     mengetik & pindah fokus (klik di luar kolom itu), tarikan berjalan
+     normal lagi seperti biasa. */
+  const el = document.activeElement;
+  if(!el) return false;
+  const tag = (el.tagName||'').toUpperCase();
+  return tag==='INPUT' || tag==='TEXTAREA' || tag==='SELECT' || el.isContentEditable === true;
+}
 function autoPullIfSafe_(){
   if(!cloudSyncEnabled()) return;
   if(_cloudPushing || _cloudPushTimer) return; /* ada perubahan lokal yang belum terkirim */
   if(isModalOpen_()) return; /* jangan ganggu form yang sedang diisi */
+  if(isTypingInField_()) return; /* jangan ganggu kolom input yang sedang difokus/diketik */
   if(window._settingsDirty) return; /* ada isian form (mis. daftar video YouTube) yang belum diklik Simpan -- jangan timpa */
   pullDBFromCloud(true);
 }
