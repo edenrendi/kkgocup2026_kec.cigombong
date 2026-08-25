@@ -2256,23 +2256,27 @@ function undianShowWinner_(winningIndex, nextTeam){
   if(titleEl) titleEl.textContent = `HASIL UNTUK SLOT ${nextTeam.slotKey}:`;
   if(nameEl) nameEl.textContent = gugus;
   if(modal) modal.style.display = 'block';
+  /* PERBAIKAN: dulu hasil undian baru benar-benar disimpan (assignGugusToTeam)
+     saat admin klik "LANJUTKAN" -- kalau admin belum sempat klik (mis. layar
+     ter-refresh, tidak sengaja pindah menu, atau lupa), maka hasil yang sudah
+     dibacakan hilang begitu saja dan Gugus tsb harus diputar ulang dari awal.
+     Sekarang begitu roda BERHENTI dan nama Gugus sudah terpilih/dibacakan,
+     hasilnya LANGSUNG disimpan otomatis ke slot Team (tidak menunggu klik
+     apa pun) -- tombol "LANJUTKAN" sekarang hanya berfungsi menutup modal &
+     me-refresh tampilan roda untuk lanjut ke Slot berikutnya, datanya sendiri
+     sudah pasti aman tersimpan sejak nama Gugus muncul di layar. */
+  if(nextTeam && gugus) assignGugusToTeam(nextTeam.id, gugus);
 }
 function undianContinue_(){
   const st = window._undian;
   if(st.pendingIdx===-1) return;
   if('speechSynthesis' in window) window.speechSynthesis.cancel();
-  const gugus = st.candidates[st.pendingIdx];
-  const { nextTeam } = undianComputeState_();
   st.pendingIdx = -1;
   st.spinning = false;
   const modal = document.getElementById('undianWinnerModal'); if(modal) modal.style.display='none';
-  if(nextTeam && gugus){
-    /* assignGugusToTeam sudah menangani semuanya: isi team.gugus, tautkan
-       peserta gugus tsb ke Team ini, saveDB (sinkron cloud), catat Log,
-       dan render ulang menu Team kalau sedang dibuka -- di sini kita cukup
-       memanggilnya lalu me-render ulang halaman Undian saja. */
-    assignGugusToTeam(nextTeam.id, gugus);
-  }
+  /* Hasil undian sudah otomatis tersimpan sejak undianShowWinner_ (lihat
+     catatan di atas) -- di sini cukup tutup modal & render ulang halaman
+     Undian untuk lanjut ke Slot/putaran berikutnya. */
   if(!document.getElementById('undianWheel')) return; /* sudah pindah halaman */
   renderUndian();
 }
@@ -2630,8 +2634,13 @@ function buildJadwalTableHTML(forPrint, publicMode){
       const namaA = p ? (namaPemainAktif ? (pemainMainNama(l,p,'A') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const namaB = p ? (namaPemainAktif ? (pemainMainNama(l,p,'B') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const lockedIcon = (p && namaPemainAktif && (p.namaPemainA!=null || p.namaPemainB!=null)) ? ' <i class="fa-solid fa-lock" style="font-size:8px;opacity:.55" title="Pemain terkunci (partai sudah selesai)"></i>' : '';
+      /* Nama pemain ditampilkan sebelah KIRI (mengikuti Team A/sisi kiri kolom
+         Pertandingan) dan sebelah KANAN (mengikuti Team B/sisi kanan) --
+         bukan lagi digabung rata tengah "namaA vs namaB" -- supaya sekilas
+         mata langsung terlihat pemain mana milik team yang mana, konsisten
+         dengan urutan Team A vs Team B di kolom Pertandingan sebelahnya. */
       const kategoriCell = p
-        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug">${namaA} <span class="text-zinc-400 font-normal">vs</span> ${namaB}${lockedIcon}</div>`
+        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug flex items-center justify-between gap-1"><span class="text-left flex-1">${namaA}</span><span class="text-zinc-400 font-normal shrink-0">vs</span><span class="text-right flex-1">${namaB}${lockedIcon}</span></div>`
         : '<span class="text-zinc-300 text-[11px]">-</span>';
       /* Skor per kategori (Main) \u2014 bukan skor akhir Partai. Tampilkan "-" jika
          kategori tersebut belum diisi skornya sama sekali, dan tampilkan
