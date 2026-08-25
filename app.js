@@ -142,6 +142,8 @@ function seedDB(){
       batasBayarTanggal: '',
       thbUrl: '',
       thbFileName: '',
+      tmTanggal: '',
+      tmTempat: '',
       tampilkanNamaPemainJadwal: true
     }
   };
@@ -160,6 +162,8 @@ function applyDBDefaults(){
   if(DB.settings.batasBayarTanggal===undefined) DB.settings.batasBayarTanggal='';
   if(DB.settings.thbUrl===undefined) DB.settings.thbUrl='';
   if(DB.settings.thbFileName===undefined) DB.settings.thbFileName='';
+  if(DB.settings.tmTanggal===undefined) DB.settings.tmTanggal='';
+  if(DB.settings.tmTempat===undefined) DB.settings.tmTempat='';
   if(DB.settings.gasUrl===undefined) DB.settings.gasUrl='';
   /* Selalu selaraskan dengan config.js kalau sudah diisi admin: ini yang
      membuat SEMUA perangkat (bukan cuma yang pernah isi URL manual di
@@ -767,7 +771,7 @@ function renderLandingPendaftaranInfo(){
   const s = DB.settings;
   const sec = document.getElementById('landingPendaftaranSection');
   if(!sec) return;
-  const anySet = s.pendaftaranDibuka || s.pendaftaranDitutup || s.batasBayarTanggal || s.thbUrl;
+  const anySet = s.pendaftaranDibuka || s.pendaftaranDitutup || s.batasBayarTanggal || s.thbUrl || s.tmTanggal;
   if(_countdownTimer){ clearInterval(_countdownTimer); _countdownTimer=null; }
   if(!anySet){ sec.classList.add('hidden'); return; }
   sec.classList.remove('hidden');
@@ -779,6 +783,13 @@ function renderLandingPendaftaranInfo(){
   const ditutupBox = document.getElementById('landingDaftarDitutup');
   if(s.pendaftaranDitutup){ ditutupBox.classList.remove('hidden'); document.getElementById('landingDaftarDitutupText').textContent = fmtDateTimeFull(s.pendaftaranDitutup); }
   else ditutupBox.classList.add('hidden');
+
+  const tmBox = document.getElementById('landingTmBox');
+  if(s.tmTanggal){
+    tmBox.classList.remove('hidden');
+    document.getElementById('landingTmText').textContent = fmtDateFull(s.tmTanggal);
+    document.getElementById('landingTmTempat').innerHTML = `<i class="fa-solid fa-location-dot mr-1"></i> ${escapeHtml(s.tmTempat||'Lokasi menyusul, pantau info dari admin')}`;
+  } else tmBox.classList.add('hidden');
 
   const cdBox = document.getElementById('landingCountdownDaftarBox');
   if(s.pendaftaranDitutup){ cdBox.classList.remove('hidden'); document.getElementById('landingCountdownDaftar').innerHTML = countdownBoxHTML('cdDaftar'); }
@@ -1832,7 +1843,10 @@ function renderPesertaTable(){
               <span class="font-mono text-[11px] text-zinc-400">${escapeHtml(first.nomorRegistrasi)}</span>
               <span class="badge" style="background:${regColor};color:white">${first.teamId?escapeHtml(teamNama(first.teamId)):'Team belum tersedia'}</span>
               <span class="badge bg-amber-100 text-amber-700">${regRows[0].status}</span>
-              <span class="ml-auto text-[11px] text-zinc-400">Koordinator: <b class="text-zinc-700 dark:text-zinc-200">${escapeHtml(first.koordinator)}</b></span>
+              <span class="ml-auto flex items-center gap-2 text-[11px] text-zinc-400">
+                <span>Koordinator: <b class="text-zinc-700 dark:text-zinc-200">${escapeHtml(first.koordinator)}</b></span>
+                ${first.hpKoordinator ? `<a href="https://wa.me/${waIntlNumber(first.hpKoordinator)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-semibold" title="Hubungi koordinator via WhatsApp"><i class="fa-brands fa-whatsapp"></i> ${escapeHtml(first.hpKoordinator)}</a>` : ''}
+              </span>
               <button onclick="editRegistration('${kid}')" class="icon-btn text-primary" title="Perbaiki data"><i class="fa-solid fa-pen"></i></button>
               <button onclick="cancelRegistration('${kid}')" class="icon-btn text-red-500" title="Batalkan pendaftaran"><i class="fa-solid fa-ban"></i></button>
             </div>
@@ -4683,6 +4697,25 @@ function renderPengaturan(){
           <span id="thbFileInfo" class="text-xs text-zinc-400"></span>
         </div>
       </div>
+      <div class="pt-3 border-t border-zinc-100 dark:border-zinc-800">
+        <div class="font-semibold text-xs mb-1"><i class="fa-solid fa-people-group text-amber-500 mr-1"></i> Jadwal Technical Meeting</div>
+        <p class="text-[11px] text-zinc-400 mb-2">Diisi otomatis jadi format Hari, Tanggal, Bulan, Tahun dan tampil menyorot di halaman utama, tepat di bawah info Pendaftaran Ditutup.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div><label class="lbl">Tanggal Technical Meeting</label><input type="date" id="p_tmTanggal" class="inp" value="${DB.settings.tmTanggal||''}"></div>
+          <div><label class="lbl">Tempat Technical Meeting</label><input id="p_tmTempat" class="inp" placeholder="mis. Aula GOR Kecamatan Cigombong" value="${escapeHtml(DB.settings.tmTempat||'')}"></div>
+        </div>
+        <button onclick="savePendaftaranSettings()" class="btn-primary text-xs mt-3"><i class="fa-solid fa-floppy-disk"></i> Simpan Jadwal Technical Meeting</button>
+      </div>
+    </div>
+
+    <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 mb-4">
+      <div class="flex items-center justify-between gap-2 mb-1 flex-wrap">
+        <div class="font-semibold text-sm"><i class="fa-solid fa-address-book text-emerald-600 mr-1"></i> Kontak Koordinator Terdaftar</div>
+        <span id="koordinatorKontakCount" class="badge bg-zinc-100 dark:bg-zinc-800 text-zinc-500">0 koordinator</span>
+      </div>
+      <p class="text-xs text-zinc-400 mb-3">Nomor HP setiap koordinator yang sudah mendaftar, supaya admin mudah menghubungi (mis. mengingatkan Jadwal Technical Meeting).</p>
+      <input id="koordinatorKontakSearch" oninput="renderKoordinatorKontak(this.value)" placeholder="Cari nama koordinator / gugus / sekolah..." class="inp mb-3">
+      <div id="koordinatorKontakList" class="space-y-2 max-h-96 overflow-y-auto"></div>
     </div>
     <div class="bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
       <div class="font-semibold text-sm mb-2">Rencana Pengembangan</div>
@@ -4696,15 +4729,51 @@ function renderPengaturan(){
     </div>`;
   renderPengaturanUploads();
   renderYtPreview();
+  renderKoordinatorKontak();
   updateCloudStatusUI();
 }
 function savePendaftaranSettings(){
   DB.settings.pendaftaranDibuka = document.getElementById('p_pendaftaranDibuka').value;
   DB.settings.pendaftaranDitutup = document.getElementById('p_pendaftaranDitutup').value;
   DB.settings.batasBayarTanggal = document.getElementById('p_batasBayar').value;
+  const tmT = document.getElementById('p_tmTanggal'); if(tmT) DB.settings.tmTanggal = tmT.value;
+  const tmP = document.getElementById('p_tmTempat'); if(tmP) DB.settings.tmTempat = tmP.value.trim();
   saveDB();
   if(document.getElementById('landingPendaftaranSection')) renderLandingPendaftaranInfo();
   Swal.fire({toast:true, position:'top-end', icon:'success', title:'Pengaturan pendaftaran tersimpan', showConfirmButton:false, timer:1500});
+}
+/* ---------- Kontak Koordinator (Pengaturan) ----------
+   Dibuat dari DB.peserta, dikelompokkan per kelompokId (satu pendaftaran =
+   satu koordinator) supaya admin punya daftar nomor HP koordinator yang
+   sudah terdaftar untuk dihubungi langsung lewat WhatsApp, misalnya untuk
+   mengingatkan Jadwal Technical Meeting. */
+function renderKoordinatorKontak(filter){
+  const wrap = document.getElementById('koordinatorKontakList');
+  if(!wrap) return;
+  filter = (filter!==undefined ? filter : (document.getElementById('koordinatorKontakSearch')||{}).value) || '';
+  const seen = {};
+  let list = [];
+  DB.peserta.forEach(p=>{
+    if(seen[p.kelompokId]) return;
+    seen[p.kelompokId] = true;
+    list.push({ koordinator:p.koordinator, hp:p.hpKoordinator, gugus:p.gugus, sekolah:p.asalSekolah, nomorRegistrasi:p.nomorRegistrasi, waktuDaftar:p.waktuDaftar });
+  });
+  list.sort((a,b)=> (a.gugus||'').localeCompare(b.gugus||'') || (a.koordinator||'').localeCompare(b.koordinator||''));
+  if(filter){
+    const f = filter.toLowerCase();
+    list = list.filter(x=>(x.koordinator+x.gugus+x.sekolah+x.hp).toLowerCase().includes(f));
+  }
+  const countEl = document.getElementById('koordinatorKontakCount');
+  if(countEl) countEl.textContent = `${list.length} koordinator`;
+  wrap.innerHTML = list.length ? list.map(x=>`
+    <div class="flex flex-wrap items-center gap-3 rounded-xl border border-zinc-100 dark:border-zinc-800 px-3 py-2.5">
+      <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${gugusColor(x.gugus)}"></span>
+      <div class="flex-1 min-w-[10rem]">
+        <div class="text-sm font-semibold">${escapeHtml(x.koordinator||'-')}</div>
+        <div class="text-[11px] text-zinc-400">${escapeHtml(x.gugus||'-')} \u00B7 ${escapeHtml(x.sekolah||'-')}</div>
+      </div>
+      ${x.hp ? `<a href="https://wa.me/${waIntlNumber(x.hp)}" target="_blank" rel="noopener" class="btn-ghost text-xs !text-emerald-600 border-emerald-200 dark:border-emerald-900/40 shrink-0"><i class="fa-brands fa-whatsapp"></i> ${escapeHtml(x.hp)}</a>` : `<span class="text-[11px] text-zinc-400 shrink-0">Nomor belum diisi</span>`}
+    </div>`).join('') : `<div class="text-xs text-zinc-400 text-center py-6">Belum ada koordinator yang terdaftar.</div>`;
 }
 function handleThbUpload(input){
   const file = input.files[0]; if(!file) return;
