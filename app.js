@@ -544,13 +544,30 @@ window.addEventListener('beforeunload', ()=>{
     }
   }catch(e){ /* biarkan, data tetap ada di localStorage perangkat ini */ }
 });
+/* PERBAIKAN "kursor/layar bergerak sendiri saat admin scroll ke bawah untuk
+   input data": navigate() SELALU memanggil window.scrollTo(top:0) di akhir --
+   ini benar & diinginkan saat admin SENGAJA berpindah menu (klik Sidebar),
+   tapi rerenderCurrentView() JUGA memanggil navigate() secara diam-diam tiap
+   kali tarikan data otomatis dari cloud berhasil (autoPullIfSafe_, tiap
+   CLOUD_PULL_INTERVAL_MS -- lihat baris di atas). Sebelum ini, refresh diam-
+   diam itu ikut memanggil scrollTo(top:0) juga, sehingga begitu admin baru
+   selesai menggeser scrollbar ke bawah (misalnya menuju baris paling bawah
+   tabel Jadwal/Peserta untuk klik tombol Input Skor) TAPI belum sempat klik
+   ke dalam kolom input (jadi isTypingInField_() di atas belum aktif), layar
+   otomatis "melompat" balik ke atas begitu tarikan 10 detik berikutnya
+   lewat -- admin harus scroll ulang. Sekarang posisi scroll disimpan SEBELUM
+   navigate() dipanggil dari sini, lalu dikembalikan lagi setelah render
+   selesai -- jadi refresh latar belakang tidak lagi mengganggu posisi
+   scroll admin sama sekali. */
 function rerenderCurrentView(){
   try{
     if(currentUser){
       renderBranding();
       const _activeNavEl = document.querySelector('.nav-link.bg-primary');
       const activeId = (_activeNavEl && _activeNavEl.dataset.nav) || 'dashboard';
-      navigate(activeId);
+      const _scrollY = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+      navigate(activeId, {silent:true});
+      window.scrollTo(0, _scrollY);
     }else if(!hasClass_('landingScreen','hidden')){
       renderLanding();
     }else if(!hasClass_('registerScreen','hidden')){
@@ -1671,13 +1688,20 @@ document.addEventListener('click', e=>{
   if(!e.target.closest('#searchResults') && e.target.id!=='globalSearch'){ const _sr=document.getElementById('searchResults'); if(_sr) _sr.classList.add('hidden'); }
 });
 window.addEventListener('hashchange', ()=>{ if(currentUser) navigate(location.hash.slice(1)||'dashboard'); });
-function navigate(id){
+function navigate(id, opts){
+  opts = opts || {};
   const allowed = MENU.filter(m=>!m.roles||m.roles.includes(currentUser.role)).map(m=>m.id);
   if(!allowed.includes(id)) id='dashboard';
   setActiveNav(id);
   const renderers = { dashboard:renderDashboard, peserta:renderPeserta, undian:renderUndian, team:renderTeam, pemain:renderPemain, jadwal:renderJadwal, bagan:renderBaganPage, skor:renderSkor, hasil:renderHasil, laporan:renderLaporan, backup:renderBackup, user:renderUserMgmt, pengaturan:renderPengaturan };
   (renderers[id]||renderDashboard)();
-  window.scrollTo({top:0, behavior:'smooth'});
+  /* opts.silent=true dipakai khusus oleh rerenderCurrentView() (refresh diam-diam
+     tiap beberapa detik) supaya TIDAK memindahkan posisi scroll admin -- lihat
+     catatan di rerenderCurrentView(). Navigasi normal (klik Sidebar, dsb) tetap
+     scroll ke atas seperti biasa. */
+  if(!opts.silent){
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
 }
 
 /* ---------- Reusable UI ---------- */
