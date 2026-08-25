@@ -326,8 +326,17 @@ async function pullDBFromCloud(silent){
      server lewat pengiriman (push) yang sudah/akan berjalan seperti biasa. */
   const pullStartedAt = Date.now();
   try{
-    const sep = url.includes('?') ? '&' : '?';
-    const res = await fetch(url+sep+'action=getdb');
+    /* PERBAIKAN "peserta masih lihat data lama walau admin sudah update":
+       dulu ditarik lewat GET biasa (fetch(url+'?action=getdb')) ke URL yang
+       PERSIS SAMA setiap kali -- request seperti ini sangat rawan disimpan
+       di cache (cache browser di HP peserta, ATAU proxy/CDN di jaringan
+       operator seluler di tengah jalan), sehingga peserta bisa terus
+       menerima jawaban LAMA dari cache walau server sudah punya data
+       terbaru. Sekarang ditarik lewat POST (request seperti ini nyaris
+       tidak pernah disimpan cache oleh browser/proxy manapun) KE endpoint
+       getdb yang baru di doPost, DITAMBAH { cache:'no-store' } supaya
+       browser juga dipaksa tidak memakai salinan cache lokalnya sendiri. */
+    const res = await fetch(url, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({action:'getdb'}), cache:'no-store' });
     const json = await res.json();
     if(window._lastLocalChangeAt > pullStartedAt){
       /* Ada perubahan lokal yang dibuat SETELAH tarikan ini mulai -> hasil
@@ -3941,6 +3950,21 @@ function doPost(e) {
       writeDBLocked_(body.db);
       return jsonOutput_({ ok: true, savedAt: new Date().toISOString() });
     }
+    if (body.action === 'getdb') {
+      /* PERBAIKAN: menarik data lewat POST (bukan hanya GET ?action=getdb di
+       * doGet di atas). Alasannya: request GET ke URL /exec yang SAMA persis
+       * berulang-ulang sangat rawan ditahan/di-cache -- baik oleh cache
+       * browser di HP peserta, maupun oleh proxy/CDN jaringan operator
+       * seluler di tengah jalan -- sehingga peserta terus menerima jawaban
+       * LAMA yang tersimpan di cache walau data di server sudah berubah
+       * (persis gejala "admin sudah update, peserta masih lihat data lama").
+       * Request POST hampir tidak pernah di-cache oleh browser/proxy manapun
+       * (secara default dianggap tidak aman untuk disimpan), jadi selalu
+       * memaksa permintaan baru sampai ke server. app.js sekarang menarik
+       * data lewat POST ini; doGet ?action=getdb tetap dipertahankan hanya
+       * untuk kompatibilitas/tes manual lewat browser. */
+      return jsonOutput_({ ok: true, db: readDB_() });
+    }
     /* Kompatibilitas lama: sinkron satu entitas/baris ke tab sheet tertentu */
     const sheetName = (body.sheet || 'LOG_AKTIVITAS').toUpperCase();
     const action = body.action || 'create';
@@ -4002,23 +4026,38 @@ function writeDB_(db) {
 }
 
 /* ---------- Backup bertanggal & mirror ke Sheets: DITUNDA, bukan tiap simpan ----------
- * Dijalankan paling cepat 1x per menit (MIRROR_THROTTLE_MS), dicatat lewat
- * PropertiesService supaya tetap berlaku walau permintaan datang dari
- * eksekusi/perangkat berbeda-beda. Kalau belum waktunya, dilewati dulu --
- * db_current.json (data yang benar-benar dipakai aplikasi) tetap selalu
- * ter-update di setiap panggilan writeDB_ di atas, jadi tidak ada data yang
- * hilang, hanya BACKUP & TAMPILAN SHEET-nya saja yang menyusul belakangan. */
+ * Dijalankan paling cepat 1x per menit (MIRROR_THROTTLE_MS). Waktu backup
+ * terakhir dicek dari file backup itu sendiri (bukan PropertiesService) --
+ * SENGAJA begitu supaya tidak menambah scope izin akses baru yang belum
+ * pernah disetujui (PropertiesService butuh izin "Manage your data" baru
+ * yang bisa membuat Apps Script menolak jalan / mengembalikan halaman HTML
+ * "minta izin" alih-alih JSON, sampai admin membuka ulang editor & meng-
+ * otorisasi ulang -- persis gejala "Gagal sinkron: Unexpected token '<'").
+ * DriveApp yang dipakai di sini scope-nya SAMA seperti yang sudah dipakai
+ * sejak awal (baca/tulis folder backup), jadi tidak perlu otorisasi baru
+ * sama sekali. db_current.json (data yang benar-benar dipakai aplikasi)
+ * tetap selalu ter-update di setiap panggilan writeDB_ di atas, jadi tidak
+ * ada data yang hilang, hanya BACKUP & TAMPILAN SHEET-nya saja yang
+ * menyusul belakangan. */
 const MIRROR_THROTTLE_MS = 60000;
 function throttleMirrorAndBackup_(folder, db, json) {
-  const props = PropertiesService.getScriptProperties();
-  const last = Number(props.getProperty('lastMirrorAt') || 0);
+  const latest = latestBackupFile_(folder);
   const now = Date.now();
-  if (now - last < MIRROR_THROTTLE_MS) return;
-  props.setProperty('lastMirrorAt', String(now));
+  if (latest && (now - latest.getDateCreated().getTime()) < MIRROR_THROTTLE_MS) return;
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT+7', 'yyyyMMdd_HHmmss');
   folder.createFile('db_backup_' + stamp + '.json', json, MimeType.PLAIN_TEXT);
   pruneBackups_(folder);
   mirrorToSheets_(db);
+}
+function latestBackupFile_(folder) {
+  let newest = null;
+  const it = folder.getFiles();
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.getName().indexOf('db_backup_') !== 0) continue;
+    if (!newest || f.getDateCreated().getTime() > newest.getDateCreated().getTime()) newest = f;
+  }
+  return newest;
 }
 
 /* ---------- Kunci penulisan (LockService) ----------
