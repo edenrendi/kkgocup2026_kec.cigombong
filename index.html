@@ -109,7 +109,7 @@ UPDATE 2026
 
   <section class="relative overflow-hidden court-line">
     <div class="max-w-6xl mx-auto px-5 py-16 md:py-24 text-center">
-      <div id="landingHeroLogoBox" class="hidden mb-5 flex items-center justify-center"><img id="landingHeroLogo" src="" class="h-20 md:h-28 w-auto object-contain mx-auto"></div>
+      <div id="landingHeroLogoBox" class="hidden mb-5 flex items-center justify-center"><img id="landingHeroLogo" src="" class="h-12 md:h-16 w-auto object-contain mx-auto"></div>
       <span class="badge bg-primary-light text-primary mb-4 inline-block">TURNAMEN BULUTANGKIS BEREGU</span>
       <h1 class="font-display font-extrabold text-4xl md:text-6xl leading-tight mb-4 text-white" id="landingHero">BADMINTIME<br><span class="text-white">Tournament</span></h1>
        <div class="creator-credit mb-5">Oleh : Eden Rendi, S.Pd</div>
@@ -296,8 +296,8 @@ UPDATE 2026
 <!-- ===================== MAIN APP (ADMIN/PANITIA) ===================== -->
 <div id="app" class="hidden min-h-screen">
   <div class="flex">
-    <aside id="sidebar" class="fixed z-30 md:static w-64 h-screen bg-ink text-white flex flex-col -translate-x-full md:translate-x-0 transition-transform no-print">
-      <div class="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+    <aside id="sidebar" class="app-sidebar-fixed fixed z-30 w-64 h-screen bg-ink text-white flex flex-col -translate-x-full md:translate-x-0 transition-transform no-print">
+      <div class="flex items-center gap-3 px-5 py-5 border-b border-white/10 shrink-0">
         <div id="sidebarLogoBox" class="w-10 h-10 rounded-xl bg-primary/25 flex items-center justify-center overflow-hidden text-lg">&#127992;</div>
         <div class="leading-tight">
           <div class="font-display font-bold text-sm" id="sidebarTitle">BADMINTIME</div>
@@ -306,12 +306,12 @@ UPDATE 2026
         </div>
       </div>
       <nav id="sideNav" class="flex-1 overflow-y-auto px-3 py-4 space-y-1 text-sm"></nav>
-      <div class="p-4 border-t border-white/10 text-[11px] text-white/40"><div>v1.0.0 &#183; BADMINTIME</div><div class="creator-credit mt-1">Oleh : Eden Rendi, S.Pd</div></div>
+      <div class="p-4 border-t border-white/10 text-[11px] text-white/40 shrink-0"><div>v1.0.0 &#183; BADMINTIME</div><div class="creator-credit mt-1">Oleh : Eden Rendi, S.Pd</div></div>
     </aside>
     <div id="sidebarOverlay" onclick="toggleSidebar(false)" class="hidden fixed inset-0 bg-black/40 z-20 md:hidden"></div>
 
-    <div class="flex-1 min-w-0">
-      <header class="sticky top-0 z-10 glass border-b border-zinc-200/70 dark:border-zinc-800 no-print">
+    <div id="appMainCol" class="app-main-col flex-1 min-w-0">
+      <header class="app-header-fixed sticky top-0 z-10 glass border-b border-zinc-200/70 dark:border-zinc-800 no-print">
         <div class="flex items-center gap-3 px-4 md:px-6 py-3">
           <button onclick="toggleSidebar()" class="md:hidden w-9 h-9 rounded-lg border border-zinc-200 dark:border-zinc-700 flex items-center justify-center"><i class="fa-solid fa-bars"></i></button>
           <div class="relative flex-1 max-w-md">
