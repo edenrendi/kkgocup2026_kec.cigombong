@@ -1176,3 +1176,51 @@ span.badmintime-title *,
 }
 #publicJadwalLiveDot { display: inline-flex; }
 #publicJadwalLiveDot.hidden { display: none; }
+
+/* ===================== ADMIN LAYOUT: Sidebar & Header FIXED/STICKY =====================
+   Sebelumnya sidebar memakai "md:static" -- artinya begitu layar >=768px, posisinya
+   kembali ke normal document flow. Karena tingginya dipatok h-screen (100vh) sementara
+   konten #mainContent bisa jauh lebih tinggi dari itu, begitu halaman discroll ke bawah
+   sidebar ikut "tergulung ke atas" dan hilang dari layar (bukan lagi mengunci di tempat).
+   Solusi: sidebar SELALU position:fixed di semua ukuran layar (mobile pakai translate-x
+   untuk sembunyi/tampil seperti sebelumnya, desktop selalu translate-x-0/terlihat),
+   lalu kolom konten diberi margin-left selebar sidebar supaya tidak tertindih.
+   Header tetap "sticky top-0" (sudah bekerja) tapi diberi kelas & z-index tambahan
+   di sini supaya konsisten terkunci di ATAS kolom kontennya sendiri, dan berlaku
+   otomatis pada SEMUA menu admin karena seluruhnya dirender ke dalam #mainContent
+   yang sama (dashboard, peserta, team, jadwal, bagan, skor, hasil, laporan, dst). */
+@media (min-width: 768px){
+  .app-main-col{ margin-left: 16rem; }
+}
+.app-sidebar-fixed{ top: 0; left: 0; will-change: transform; }
+.app-header-fixed{ z-index: 15; }
+
+/* ===================== PUBLIC: Bagan & Jadwal panel (halaman awal) =====================
+   Redesign kartu panel publik Bagan & Jadwal Pertandingan supaya lebih menarik &
+   profesional (bukan tabel polos), plus tombol "Lihat" (preview sebelum unduh) dan
+   fitur buka/tutup (dropdown/collapse) per panel. */
+.public-panel-card{ position:relative; }
+.public-panel-head{ cursor:pointer; user-select:none; }
+.public-panel-collapse-icon{ transition: transform .2s ease; }
+.public-panel-card.is-collapsed .public-panel-collapse-icon{ transform: rotate(-90deg); }
+.public-panel-card.is-collapsed .public-panel-body{ display:none; }
+.public-panel-body{ animation: fadeIn .25s ease; }
+
+.public-panel-head-icon{
+  width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center;
+  background: var(--panel-accent,#E1122F);
+  color:#fff; font-size:12px; flex:none; box-shadow:0 3px 10px -4px rgba(0,0,0,.5);
+}
+.public-panel-btn-group{ display:flex; align-items:center; gap:6px; }
+
+/* Tabel Jadwal publik dipercantik: header gradasi, baris zebra & rapi, tanpa
+   mengubah logika/isi data (tetap memakai buildJadwalTableHTML yang sama
+   dipakai admin & hasil cetak -- supaya data selalu konsisten & akurat). */
+#publicJadwalRingkas table thead tr{ background: linear-gradient(135deg,#FFE7EA,#FFF6F2) !important; }
+.dark #publicJadwalRingkas table thead tr{ background: linear-gradient(135deg,rgba(225,18,47,.22),rgba(225,18,47,.08)) !important; }
+#publicJadwalRingkas table thead th{ font-family:'Poppins',sans-serif; font-weight:800 !important; letter-spacing:.03em; text-transform:uppercase; font-size:9.5px !important; }
+#publicJadwalRingkas table tbody tr:nth-child(even):not(.jdw-live-pulse){ background: rgba(148,163,184,.045); }
+#publicJadwalRingkas table td, #publicJadwalRingkas table th{ border-color: rgba(148,163,184,.25) !important; }
+#publicJadwalRingkas table tr.jdw-partai-start > td{ border-top: 2.5px solid var(--panel-accent,#E1122F) !important; }
+#publicJadwalRingkas{ border-radius:12px; overflow:hidden; border:1px solid rgba(148,163,184,.22); }
+#publicBaganBox{ border-radius:12px; }
