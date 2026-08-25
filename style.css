@@ -1283,3 +1283,20 @@ span.badmintime-title *,
   padding-top:2px; border-top:1px dashed currentColor; border-top-color:rgba(0,0,0,.08);
 }
 .dark .pjc-kat-detail{ border-top-color:rgba(255,255,255,.1); }
+
+/* ---------- Jadwal Technical Meeting (highlight di halaman utama) ----------
+   Kartu ini sengaja dibuat menonjol -- border tebal, gradasi warna amber, dan
+   glow yang berdenyut -- supaya peserta yang membuka halaman utama langsung
+   fokus ke bagian ini, tanpa perlu scroll mencari-cari. */
+.tm-highlight{
+  animation: tmGlow 2.2s ease-in-out infinite;
+}
+@keyframes tmGlow{
+  0%,100%{ box-shadow: 0 0 0 0 rgba(245,158,11,.35); }
+  50%{ box-shadow: 0 0 0 8px rgba(245,158,11,0); }
+}
+.tm-icon-pulse{ animation: tmIconPulse 1.6s ease-in-out infinite; }
+@keyframes tmIconPulse{ 0%,100%{ opacity:1; transform:scale(1); } 50%{ opacity:.75; transform:scale(1.06); } }
+@media (prefers-reduced-motion: reduce){
+  .tm-highlight, .tm-icon-pulse{ animation:none; }
+}
