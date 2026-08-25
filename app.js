@@ -443,6 +443,31 @@ async function updatePesertaToCloud_(pesertaArr, nomorRegistrasi){
   }catch(e){ return {ok:false, reason:e.message}; }
 }
 
+/* ---------- Hapus peserta LANGSUNG di server (atomik) ----------
+   Dulu penghapusan peserta di panel admin hanya terjadi lokal (filter array)
+   lalu ikut terkirim lewat pengiriman 'savedb' biasa berikutnya. Sekarang
+   'savedb' di server (mergeAndSaveDb_ di Code.gs) SENGAJA menggabungkan
+   kembali peserta yang "hilang dari salinan admin" (supaya peserta yang baru
+   mendaftar dari perangkat lain tidak ikut tertimpa hilang) -- konsekuensinya,
+   penghapusan yang HANYA mengandalkan "hilang dari savedb" tidak lagi cukup,
+   peserta yang dihapus bisa "hidup lagi" lewat penggabungan itu. Makanya
+   penghapusan peserta sekarang WAJIB juga dikirim lewat endpoint atomik
+   terpisah ini supaya benar-benar terhapus permanen di server. */
+async function deletePesertaToCloud_(ids){
+  const url = (DB && DB.settings && DB.settings.gasUrl) || resolvedGasUrl_();
+  if(!url) return {ok:false, reason:'URL Apps Script belum diatur di config.js'};
+  try{
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ action:'deletepeserta', ids })
+    });
+    let json = null; try{ json = await res.json(); }catch(e){}
+    if(json && json.ok===false) throw new Error(json.error||'Gagal menghapus di server');
+    return {ok:true};
+  }catch(e){ return {ok:false, reason:e.message}; }
+}
+
 /* ---------- Auto-refresh berkala ----------
    Supaya perangkat lain (admin/peserta lain) yang sedang membuka layar yang
    sama melihat data terbaru tanpa harus refresh manual. Ditarik otomatis:
@@ -4831,6 +4856,12 @@ function deleteRow(coll, id){
   Swal.fire({icon:'warning', title:'Hapus data ini?', showCancelButton:true, confirmButtonColor:'#2563EB', cancelButtonColor:'#94A3B8', confirmButtonText:'Hapus'}).then(r=>{
     if(!r.isConfirmed) return;
     DB[coll] = DB[coll].filter(x=>x.id!==id); saveDB(); addLog('Hapus Data','Menghapus data dari '+coll);
+    /* PERBAIKAN: khusus peserta, kirim juga penghapusan langsung ke server
+       (lihat penjelasan di deletePesertaToCloud_) supaya tidak "hidup lagi"
+       akibat penggabungan otomatis saat savedb berikutnya. */
+    if(coll==='peserta' && cloudSyncEnabled()){
+      deletePesertaToCloud_([id]).then(res=>{ if(!res.ok) showCloudSaveToast_(false, res.reason); });
+    }
     navigate(location.hash.slice(1)||'dashboard');
   });
 }
