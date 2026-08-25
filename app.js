@@ -751,22 +751,40 @@ function renderPublicBagan(){
      view) sengaja dibuat lebih kaya -- berwarna per Partai + penanda LIVE --
      tapi itu TIDAK ikut ke hasil unduhan. */
   document.getElementById('publicPanel').innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
-    <div class="lg:col-span-3 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
-      <div class="flex items-center justify-between mb-3 no-print">
-        <div class="font-display font-semibold text-sm"><i class="fa-solid fa-diagram-project text-primary mr-1.5"></i>Bagan Pertandingan</div>
-        <button onclick="printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
-      </div>
-      <div id="publicBaganBox"></div>
-    </div>
-    <div class="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
-      <div class="flex items-center justify-between mb-1 no-print">
-        <div class="font-display font-semibold text-sm flex items-center gap-1.5"><i class="fa-solid fa-calendar-days text-primary"></i>Jadwal Pertandingan
-          <span id="publicJadwalLiveDot" class="hidden items-center gap-1 text-[10px] font-bold text-red-500 ml-1"><span class="jdw-live-dot"></span> LIVE</span>
+    <div id="publicPanelBagan" class="public-panel-card lg:col-span-3 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800" style="--panel-accent:#E1122F">
+      <div class="public-panel-head flex items-center justify-between mb-3 no-print" onclick="togglePublicPanel('publicPanelBagan')">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="public-panel-head-icon"><i class="fa-solid fa-diagram-project"></i></div>
+          <div class="font-display font-semibold text-sm truncate">Bagan Pertandingan</div>
         </div>
-        <button onclick="printJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+        <div class="public-panel-btn-group">
+          <button onclick="event.stopPropagation();previewBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-eye"></i> Lihat</button>
+          <button onclick="event.stopPropagation();printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+          <i class="fa-solid fa-chevron-down public-panel-collapse-icon text-zinc-400 text-xs ml-1"></i>
+        </div>
       </div>
-      <div class="text-[11px] text-zinc-400 mb-3 no-print">Tiap Partai diberi warna berbeda; kategori yang sedang berlangsung menyala merah.</div>
-      <div id="publicJadwalRingkas" class="max-h-[560px] overflow-auto pr-1 -mx-1 px-1"></div>
+      <div class="public-panel-body">
+        <div id="publicBaganBox"></div>
+      </div>
+    </div>
+    <div id="publicPanelJadwal" class="public-panel-card lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800" style="--panel-accent:#2563EB">
+      <div class="public-panel-head flex items-center justify-between mb-1 no-print" onclick="togglePublicPanel('publicPanelJadwal')">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="public-panel-head-icon" style="--panel-accent:#2563EB"><i class="fa-solid fa-calendar-days"></i></div>
+          <div class="font-display font-semibold text-sm flex items-center gap-1.5 truncate">Jadwal Pertandingan
+            <span id="publicJadwalLiveDot" class="hidden items-center gap-1 text-[10px] font-bold text-red-500 ml-1"><span class="jdw-live-dot"></span> LIVE</span>
+          </div>
+        </div>
+        <div class="public-panel-btn-group">
+          <button onclick="event.stopPropagation();previewJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-eye"></i> Lihat</button>
+          <button onclick="event.stopPropagation();printJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+          <i class="fa-solid fa-chevron-down public-panel-collapse-icon text-zinc-400 text-xs ml-1"></i>
+        </div>
+      </div>
+      <div class="public-panel-body">
+        <div class="text-[11px] text-zinc-400 mb-3 mt-2 no-print">Tiap Partai diberi warna berbeda; kategori yang sedang berlangsung menyala merah.</div>
+        <div id="publicJadwalRingkas" class="max-h-[560px] overflow-auto pr-1 -mx-1 px-1"></div>
+      </div>
     </div>
   </div>`;
   drawBagan('publicBaganBox', false);
@@ -775,6 +793,52 @@ function renderPublicBagan(){
   /* Disegarkan tiap 20 detik supaya highlight "sedang bertanding" otomatis
      berpindah begitu jamnya lewat, tanpa peserta perlu refresh halaman. */
   window._publicJadwalLiveTimer = setInterval(renderPublicJadwalRingkas_, 20000);
+}
+/* Buka/tutup (dropdown) panel Bagan / Jadwal Pertandingan di halaman awal --
+   supaya peserta bisa menyembunyikan panel yang sedang tidak diperlukan
+   tanpa harus meninggalkan halaman ini. Klik di area judul (bukan tombol
+   Lihat/Download) untuk toggle; ikon chevron ikut berputar mengikuti state. */
+function togglePublicPanel(panelId){
+  const el = document.getElementById(panelId);
+  if(el) el.classList.toggle('is-collapsed');
+}
+/* Pratinjau Bagan Pertandingan SEBELUM diunduh -- memakai generator HTML yang
+   sama persis (rbHeaderHTML/rbBracketBodyHTML) dengan yang dipakai untuk
+   cetak PDF, jadi apa yang dilihat peserta di pratinjau ini 100% sama dengan
+   isi file yang akan diunduh. Tombol "Unduh PDF" di dalam modal langsung
+   melanjutkan ke alur cetak (printBagan) yang sudah ada. */
+function previewBagan(){
+  if(!DB.baganMeta.generated || !DB.laga.length){
+    Swal.fire({icon:'info', title:'Bagan belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu.', confirmButtonColor:'#2563EB'});
+    return;
+  }
+  Swal.fire({
+    title:'Pratinjau Bagan Pertandingan',
+    html:`<div style="max-height:65vh;overflow:auto;border:1px solid #E4E4E7;border-radius:10px;padding:14px;background:#fff;text-align:left" class="bagan-redesign">${rbHeaderHTML()}${rbBracketBodyHTML(false)}</div>`,
+    width:720,
+    confirmButtonText:'Unduh PDF',
+    confirmButtonColor:'#2563EB',
+    showCancelButton:true,
+    cancelButtonText:'Tutup'
+  }).then(r=>{ if(r.isConfirmed) printBagan(); });
+}
+/* Pratinjau Jadwal Pertandingan SEBELUM diunduh -- memakai tabel Jadwal yang
+   sama (buildJadwalTableHTML) dengan yang tampil di layar & yang dicetak,
+   jadi isinya selalu konsisten & akurat. */
+function previewJadwal(){
+  if(!DB.laga.length){
+    Swal.fire({icon:'info', title:'Jadwal belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu di menu Bagan sebelum melihat jadwal.', confirmButtonColor:'#2563EB'});
+    return;
+  }
+  Swal.fire({
+    title:'Pratinjau Jadwal Pertandingan',
+    html:`<div style="max-height:65vh;overflow:auto;border:1px solid #E4E4E7;border-radius:10px;padding:6px;background:#fff;text-align:left"><table class="w-full border-collapse text-[11px]" style="table-layout:fixed">${buildJadwalTableHTML(false,true)}</table></div>`,
+    width:760,
+    confirmButtonText:'Unduh PDF',
+    confirmButtonColor:'#2563EB',
+    showCancelButton:true,
+    cancelButtonText:'Tutup'
+  }).then(r=>{ if(r.isConfirmed) printJadwal(); });
 }
 /* ---------- Jadwal (publik, di sebelah Bagan) ----------
    Menentukan apakah sebuah PARTAI sedang berlangsung SEKARANG, berdasarkan:
