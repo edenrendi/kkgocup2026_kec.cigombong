@@ -758,8 +758,7 @@ function renderPublicBagan(){
           <div class="font-display font-semibold text-sm truncate">Bagan Pertandingan</div>
         </div>
         <div class="public-panel-btn-group">
-          <button onclick="event.stopPropagation();previewBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-eye"></i> Lihat</button>
-          <button onclick="event.stopPropagation();printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+          <button onclick="event.stopPropagation();downloadPublicBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
           <i class="fa-solid fa-chevron-down public-panel-collapse-icon text-zinc-400 text-xs ml-1"></i>
         </div>
       </div>
@@ -776,8 +775,7 @@ function renderPublicBagan(){
           </div>
         </div>
         <div class="public-panel-btn-group">
-          <button onclick="event.stopPropagation();previewJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-eye"></i> Lihat</button>
-          <button onclick="event.stopPropagation();printJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+          <button onclick="event.stopPropagation();downloadPublicJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
           <i class="fa-solid fa-chevron-down public-panel-collapse-icon text-zinc-400 text-xs ml-1"></i>
         </div>
       </div>
@@ -912,6 +910,7 @@ function renderPublicJadwalRingkas_(){
       const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
       const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
       const live = isPartaiLiveNow_(l);
+      const selesai = l.status === 'Selesai';
       const colorA = teamColor(l.teamA), colorB = teamColor(l.teamB);
       const katChips = items.map((p,idx)=>{
         if(!p) return '';
@@ -920,18 +919,46 @@ function renderPublicJadwalRingkas_(){
         const done = mainSudahMain_(l,p);
         const stateCls = isLiveMain ? 'pjc-kat-live' : done ? 'pjc-kat-done' : 'pjc-kat-pending';
         const scoreHtml = done ? mainSkorText(l,p) : (isLiveMain ? '<i class="fa-solid fa-shuttlecock"></i>' : (mulai||'-'));
-        return `<div class="pjc-kat-chip ${stateCls}"><span class="pjc-kat-name">${escapeHtml(kategoriNama(p.kategoriId))}</span><span class="pjc-kat-score">${scoreHtml}</span></div>`;
+        // Nama pemain: kalau Main ini sudah selesai (ada pemenang), nama yang tampil sudah
+        // TERKUNCI (snapshot saat itu, lihat lockPemainMain_) supaya tidak berubah walau
+        // roster kategori diedit admin belakangan. Selama belum selesai, tetap mengikuti
+        // data pemain PALING BARU (live) -- termasuk kalau pemain yang sama juga terdaftar
+        // di kategori lain (mis. Tunggal Putra sekaligus Ganda Campuran).
+        const namaA = pemainMainNama(l, p, 'A');
+        const namaB = pemainMainNama(l, p, 'B');
+        const playersHtml = (namaA || namaB) ? `<div class="pjc-kat-players">
+            ${namaA?`<div class="pjc-kat-player"><span class="pjc-kat-player-dot" style="background:${colorA}"></span>${escapeHtml(namaA)}</div>`:''}
+            ${namaB?`<div class="pjc-kat-player"><span class="pjc-kat-player-dot" style="background:${colorB}"></span>${escapeHtml(namaB)}</div>`:''}
+          </div>` : '';
+        // Skor rinci per-set (bukan cuma jumlah set menang) supaya "skor pemain" yang
+        // tampil di halaman awal lebih informatif -- mis. "21-15 &middot; 18-21 &middot; 21-19".
+        const detailScore = done ? mainSkorDetailText_(l,p) : '';
+        const detailHtml = detailScore ? `<div class="pjc-kat-detail">${detailScore}</div>` : '';
+        return `<div class="pjc-kat-chip ${stateCls}">
+          <div class="pjc-kat-top"><span class="pjc-kat-name">${escapeHtml(kategoriNama(p.kategoriId))}</span><span class="pjc-kat-score">${scoreHtml}</span></div>
+          ${playersHtml}
+          ${detailHtml}
+        </div>`;
       }).join('');
-      cards.push(`<div class="pjc-card${live?' pjc-live':''}">
+      // Hasil skor TIM (total kategori yang dimenangkan tiap tim) -- ditampilkan begitu
+      // Partai ini berstatus Selesai, supaya peserta langsung tahu skor akhir & pemenangnya
+      // tanpa harus buka menu "Hasil & Klasemen" terpisah.
+      const hasilTeamHtml = selesai ? `<div class="pjc-final-result">
+          <i class="fa-solid fa-trophy"></i>
+          <span class="pjc-final-result-text">${l.pemenangTeam ? `${escapeHtml(teamNama(l.pemenangTeam))} Menang` : 'Seri'}</span>
+          <span class="pjc-final-result-score">${l.skorTeamA}&nbsp;&#8211;&nbsp;${l.skorTeamB}</span>
+        </div>` : '';
+      cards.push(`<div class="pjc-card${live?' pjc-live':''}${selesai?' pjc-done':''}">
         <div class="pjc-top">
           <span class="pjc-partai-badge">${l.ronde}${pk?` &middot; Partai ${pk}`:''}</span>
-          ${live?'<span class="pjc-live-badge"><span class="jdw-live-dot"></span> LIVE</span>':(l.jam?`<span class="pjc-jam"><i class="fa-regular fa-clock"></i> ${l.jam}</span>`:'')}
+          ${live?'<span class="pjc-live-badge"><span class="jdw-live-dot"></span> LIVE</span>':(selesai?'<span class="pjc-selesai-badge"><i class="fa-solid fa-circle-check"></i> Selesai</span>':(l.jam?`<span class="pjc-jam"><i class="fa-regular fa-clock"></i> ${l.jam}</span>`:''))}
         </div>
         <div class="pjc-teams">
           <div class="pjc-team"><span class="pjc-dot" style="background:${colorA}"></span><span class="pjc-team-name">${escapeHtml(teamNama(l.teamA))}</span></div>
           <div class="pjc-vs">VS</div>
           <div class="pjc-team pjc-team-b"><span class="pjc-team-name">${escapeHtml(teamNama(l.teamB))}</span><span class="pjc-dot" style="background:${colorB}"></span></div>
         </div>
+        ${hasilTeamHtml}
         <div class="pjc-kategori-list">${katChips}</div>
       </div>`);
     });
@@ -2506,6 +2533,24 @@ function mainSkorText(l, p){
   if(!played) return '<span class="text-zinc-300">-</span>';
   return `<span class="font-score font-bold" style="color:${colA}">${winsA}</span><span class="text-zinc-400 mx-1">-</span><span class="font-score font-bold" style="color:${colB}">${winsB}</span>`;
 }
+/* Skor RINCI per-set (bukan cuma jumlah set menang) -- khusus dipakai di kartu
+   Jadwal Pertandingan halaman awal (lihat renderPublicJadwalRingkas_) supaya
+   peserta bisa melihat skor pemain apa adanya per set, mis. "21-15 &middot; 18-21
+   &middot; 21-19", bukan cuma ringkasan "2-1". Untuk mode SCORE 42 (skor langsung
+   tanpa per-set) cukup ditampilkan total akhirnya saja. */
+function mainSkorDetailText_(l, p){
+  if(!p) return '';
+  const mode = l.scoreMode || 'SET_ALL';
+  if(mode==='SCORE_42'){
+    const a=(p.score42&&p.score42[0])||0, b=(p.score42&&p.score42[1])||0;
+    if(a===0 && b===0) return '';
+    return `${a}&#8211;${b}`;
+  }
+  const sets = p.sets || [[0,0],[0,0],[0,0]];
+  const played = sets.filter(s=> s[0]>0 || s[1]>0);
+  if(!played.length) return '';
+  return played.map(s=> `${s[0]}&#8211;${s[1]}`).join(' &middot; ');
+}
 function renderJadwalTable(){
   document.getElementById('jdwTable').innerHTML = buildJadwalTableHTML();
 }
@@ -2582,10 +2627,11 @@ function buildJadwalTableHTML(forPrint, publicMode){
          toggleTampilanNamaPemainJadwal). Default AKTIF (tampil apa adanya). */
       const namaPemainAktif = DB.settings.tampilkanNamaPemainJadwal !== false;
       const DOT_PLACEHOLDER = '<span class="text-zinc-400">.....................</span>';
-      const namaA = p ? (namaPemainAktif ? (partaiPemainNama(l.teamA, p.kategoriId) || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
-      const namaB = p ? (namaPemainAktif ? (partaiPemainNama(l.teamB, p.kategoriId) || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
+      const namaA = p ? (namaPemainAktif ? (pemainMainNama(l,p,'A') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
+      const namaB = p ? (namaPemainAktif ? (pemainMainNama(l,p,'B') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
+      const lockedIcon = (p && namaPemainAktif && (p.namaPemainA!=null || p.namaPemainB!=null)) ? ' <i class="fa-solid fa-lock" style="font-size:8px;opacity:.55" title="Pemain terkunci (partai sudah selesai)"></i>' : '';
       const kategoriCell = p
-        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug">${namaA} <span class="text-zinc-400 font-normal">vs</span> ${namaB}</div>`
+        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug">${namaA} <span class="text-zinc-400 font-normal">vs</span> ${namaB}${lockedIcon}</div>`
         : '<span class="text-zinc-300 text-[11px]">-</span>';
       /* Skor per kategori (Main) \u2014 bukan skor akhir Partai. Tampilkan "-" jika
          kategori tersebut belum diisi skornya sama sekali, dan tampilkan
@@ -3155,6 +3201,157 @@ function executePrintBagan(size, orient){
   requestAnimationFrame(()=>requestAnimationFrame(doMeasureAndPrint));
 }
 
+/* ---------- UNDUH LANGSUNG (bukan dialog print) untuk Bagan & Jadwal di HALAMAN AWAL ----------
+   Tombol "Download" di panel publik (Bagan Pertandingan & Jadwal Pertandingan) pada halaman
+   awal SENGAJA dibuat BEDA dari printBagan()/printJadwal() (dipakai admin) yang memanggil
+   window.print(). Di HP, window.print() cuma membuka dialog print/share bawaan browser --
+   peserta harus tahu harus pilih "Simpan sebagai PDF" sendiri dulu, dan di sebagian browser
+   HP malah tidak ada opsi unduh langsung sama sekali. Di sini file PDF langsung DIBUAT lewat
+   html2canvas (memotret sheet cetak sebagai gambar) + jsPDF, lalu diunduh otomatis ke
+   perangkat lewat doc.save() -- sama seperti alur downloadBuktiPdf(). Sheet cetak yang dipakai
+   TETAP #baganPrintSheet / #jadwalPrintSheet yang sama persis dengan punya admin, jadi hasil
+   unduhan peserta 100% identik isinya dengan yang diunduh admin. */
+function elementToPdfAndSave_(sheet, wMm, hMm, filename){
+  return html2canvas(sheet, {scale:2, useCORS:true, backgroundColor:'#ffffff'}).then(canvas=>{
+    const { jsPDF } = window.jspdf;
+    const orientation = wMm >= hMm ? 'landscape' : 'portrait';
+    const doc = new jsPDF({unit:'mm', format:[wMm,hMm], orientation});
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    doc.addImage(imgData, 'JPEG', 0, 0, wMm, hMm);
+    doc.save(filename);
+  });
+}
+function downloadPublicBagan(){
+  if(!DB.baganMeta.generated || !DB.laga.length){
+    Swal.fire({icon:'info', title:'Bagan belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu.', confirmButtonColor:'#2563EB'});
+    return;
+  }
+  // Failsafe: kalau library html2canvas gagal dimuat (mis. CDN diblokir jaringan),
+  // jangan sampai tombol Download malah tidak berfungsi sama sekali -- jatuhkan ke
+  // alur cetak lama (printBagan) yang tidak butuh html2canvas.
+  if(typeof html2canvas === 'undefined'){ printBagan(); return; }
+  openPaperSizeModal({
+    title:'Unduh Bagan Pertandingan',
+    desc:'Pilih ukuran kertas dan orientasi (landscape disarankan untuk bagan). File PDF akan otomatis terunduh ke perangkat Anda.',
+    onPick:(size,orient)=> executeDownloadPublicBagan(size, orient)
+  });
+}
+function executeDownloadPublicBagan(size, orient){
+  const ok = preparePrintBaganSheet();
+  if(!ok){ Swal.fire({icon:'info', title:'Bagan belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu.', confirmButtonColor:'#2563EB'}); return; }
+  let {w,h} = PAPER_SIZES_MM[size] || PAPER_SIZES_MM.A4;
+  if(orient==='landscape'){ const t=w; w=h; h=t; }
+  const marginMm = 8;
+  const sheet = document.getElementById('baganPrintSheet');
+  const inner = document.getElementById('baganPrintInner');
+  inner.style.transform = 'none';
+  inner.style.width = 'max-content';
+  sheet.style.cssText = '';
+  document.body.classList.add('printing-bagan');
+  Swal.fire({title:'Menyiapkan PDF...', html:'Mohon tunggu sebentar, file sedang dibuat.', allowOutsideClick:false, allowEscapeKey:false, showConfirmButton:false, didOpen:()=>Swal.showLoading()});
+  const doMeasureAndSave = ()=>{
+    const pxPerMm = 96/25.4;
+    const pageWpx = w*pxPerMm, pageHpx = h*pxPerMm;
+    const marginPx = marginMm*pxPerMm;
+    sheet.style.boxSizing = 'border-box';
+    sheet.style.width = pageWpx+'px';
+    sheet.style.height = pageHpx+'px';
+    sheet.style.padding = marginPx+'px';
+    sheet.style.setProperty('display', 'flex', 'important');
+    sheet.style.alignItems = 'flex-start';
+    sheet.style.justifyContent = 'center';
+    sheet.style.overflow = 'hidden';
+    sheet.style.margin = '0';
+    sheet.style.background = '#ffffff';
+
+    const rect = inner.getBoundingClientRect();
+    const availW = pageWpx - marginPx*2;
+    const availH = pageHpx - marginPx*2;
+    const scale = Math.min(availW/rect.width, availH/rect.height, 1);
+    inner.style.transformOrigin = 'top center';
+    inner.style.transform = `scale(${scale})`;
+    inner.style.flex = 'none';
+
+    const cleanup = ()=>{
+      document.body.classList.remove('printing-bagan');
+      inner.style.transform=''; inner.style.width=''; inner.style.transformOrigin=''; inner.style.flex='';
+      sheet.style.cssText = '';
+    };
+    elementToPdfAndSave_(sheet, w, h, `Bagan-Pertandingan-${todayISO()}.pdf`)
+      .then(()=>{ cleanup(); Swal.close(); })
+      .catch(err=>{
+        console.error('[downloadPublicBagan] gagal:', err);
+        cleanup();
+        Swal.fire({icon:'error', title:'Gagal membuat PDF', text:'Terjadi kesalahan saat membuat file. Silakan coba lagi.', confirmButtonColor:'#2563EB'});
+      });
+  };
+  requestAnimationFrame(()=>requestAnimationFrame(doMeasureAndSave));
+}
+function downloadPublicJadwal(){
+  if(!DB.laga.length){
+    Swal.fire({icon:'info', title:'Jadwal belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu di menu Bagan sebelum mengunduh jadwal.', confirmButtonColor:'#2563EB'});
+    return;
+  }
+  if(typeof html2canvas === 'undefined'){ printJadwal(); return; }
+  openPaperSizeModal({
+    title:'Unduh Jadwal Pertandingan',
+    desc:'Pilih ukuran kertas dan orientasi. File PDF akan otomatis terunduh ke perangkat Anda.',
+    onPick:(size,orient)=> executeDownloadPublicJadwal(size, orient)
+  });
+}
+function executeDownloadPublicJadwal(size, orient){
+  const ok = preparePrintJadwalSheet();
+  if(!ok){ Swal.fire({icon:'info', title:'Jadwal belum tersedia', text:'Admin perlu men-generate bagan terlebih dahulu di menu Bagan sebelum mengunduh jadwal.', confirmButtonColor:'#2563EB'}); return; }
+  let {w,h} = PAPER_SIZES_MM[size] || PAPER_SIZES_MM.A4;
+  if(orient==='landscape'){ const t=w; w=h; h=t; }
+  const marginMm = 8;
+  const sheet = document.getElementById('jadwalPrintSheet');
+  const inner = document.getElementById('jadwalPrintInner');
+  inner.style.transform = 'none';
+  inner.style.width = '100%';
+  sheet.style.cssText = '';
+  document.body.classList.add('printing-jadwal');
+  Swal.fire({title:'Menyiapkan PDF...', html:'Mohon tunggu sebentar, file sedang dibuat.', allowOutsideClick:false, allowEscapeKey:false, showConfirmButton:false, didOpen:()=>Swal.showLoading()});
+  const doMeasureAndSave = ()=>{
+    const pxPerMm = 96/25.4;
+    const pageWpx = w*pxPerMm, pageHpx = h*pxPerMm;
+    const marginPx = marginMm*pxPerMm;
+    sheet.style.boxSizing = 'border-box';
+    sheet.style.width = pageWpx+'px';
+    sheet.style.height = pageHpx+'px';
+    sheet.style.padding = marginPx+'px';
+    sheet.style.setProperty('display', 'flex', 'important');
+    sheet.style.alignItems = 'flex-start';
+    sheet.style.justifyContent = 'center';
+    sheet.style.overflow = 'hidden';
+    sheet.style.margin = '0';
+    sheet.style.background = '#ffffff';
+
+    const rect = inner.getBoundingClientRect();
+    const availW = pageWpx - marginPx*2;
+    const availH = pageHpx - marginPx*2;
+    const scale = Math.min(availW/rect.width, availH/rect.height, 1.6);
+    inner.style.width = availW+'px';
+    inner.style.transformOrigin = 'top center';
+    inner.style.transform = `scale(${scale})`;
+    inner.style.flex = 'none';
+
+    const cleanup = ()=>{
+      document.body.classList.remove('printing-jadwal');
+      inner.style.transform=''; inner.style.width=''; inner.style.transformOrigin=''; inner.style.flex='';
+      sheet.style.cssText = '';
+    };
+    elementToPdfAndSave_(sheet, w, h, `Jadwal-Pertandingan-${todayISO()}.pdf`)
+      .then(()=>{ cleanup(); Swal.close(); })
+      .catch(err=>{
+        console.error('[downloadPublicJadwal] gagal:', err);
+        cleanup();
+        Swal.fire({icon:'error', title:'Gagal membuat PDF', text:'Terjadi kesalahan saat membuat file. Silakan coba lagi.', confirmButtonColor:'#2563EB'});
+      });
+  };
+  requestAnimationFrame(()=>requestAnimationFrame(doMeasureAndSave));
+}
+
 /* ---------- SKOR ---------- */
 function renderSkor(){
   const active = DB.laga.filter(l=>l.teamA && l.teamB);
@@ -3191,6 +3388,39 @@ function partaiPemainNama(teamId, kategoriId){
   if(!list.length) return '';
   return list.map(x=>x.nama).join(' / ');
 }
+/* ---------- Nama pemain per-Main: LIVE vs TERKUNCI ----------
+   Satu Team punya roster per kategori yang bisa berubah (mis. admin memperbaiki
+   data pemain, atau pemain yang sama ternyata juga terdaftar di kategori lain
+   seperti Ganda Campuran selain Tunggal Putra). Selama sebuah Main (partai
+   per-kategori dalam satu Partai/laga) BELUM selesai, nama pemain yang
+   ditampilkan selalu mengikuti data TERKINI (live) dari menu Peserta/Team --
+   supaya begitu admin memperbarui pemain untuk kategori itu, Main yang belum
+   dimainkan otomatis ikut ter-update.
+   Begitu Main tsb SELESAI (p.winner sudah terisi, lihat lockPemainMain_ yang
+   dipanggil dari updateSetScore/updateScore42), nama pemain yang sedang
+   tampil saat itu di-SNAPSHOT ke p.namaPemainA/p.namaPemainB dan dianggap
+   TERKUNCI -- perubahan roster setelahnya TIDAK lagi mengubah riwayat Main
+   yang sudah selesai ini, walau nanti admin mengedit data Peserta. Begitu
+   masuk ke Partai berikutnya (ronde selanjutnya), objek `p`-nya baru (belum
+   terkunci) sehingga otomatis mengambil roster PALING BARU lagi. */
+function pemainMainNama(l, p, sisi){
+  if(!p) return '';
+  const locked = sisi==='A' ? p.namaPemainA : p.namaPemainB;
+  if(locked !== undefined && locked !== null) return locked;
+  const teamId = sisi==='A' ? l.teamA : l.teamB;
+  return partaiPemainNama(teamId, p.kategoriId);
+}
+function lockPemainMain_(l, p){
+  if(p.winner){
+    p.namaPemainA = partaiPemainNama(l.teamA, p.kategoriId) || '';
+    p.namaPemainB = partaiPemainNama(l.teamB, p.kategoriId) || '';
+  } else {
+    // Belum/tidak lagi ada pemenang (mis. skor direset admin) -- lepas kunci,
+    // kembali mengikuti roster terkini selama Main ini belum selesai lagi.
+    p.namaPemainA = null;
+    p.namaPemainB = null;
+  }
+}
 /* Titik status per-partai: gray=belum main, orange=live/berjalan, green=selesai */
 function partaiStatusDot(p, mode){
   if(p.winner) return 'green';
@@ -3202,8 +3432,10 @@ function partaiStatusDot(p, mode){
 function sv2RowHTML(l, p, i, mode, colA, colB){
   if(!p.sets) p.sets = [[0,0],[0,0],[0,0]];
   if(!p.score42) p.score42 = [0,0];
-  const namaA = partaiPemainNama(l.teamA, p.kategoriId);
-  const namaB = partaiPemainNama(l.teamB, p.kategoriId);
+  const namaA = pemainMainNama(l, p, 'A');
+  const namaB = pemainMainNama(l, p, 'B');
+  const isLocked = p.namaPemainA!=null || p.namaPemainB!=null;
+  const lockedIcon = isLocked ? ' <i class="fa-solid fa-lock" style="font-size:9px;opacity:.55" title="Pemain terkunci -- Main ini sudah selesai, nama pemain tidak lagi mengikuti perubahan roster"></i>' : '';
   const dot = partaiStatusDot(p, mode);
   const winnerLabel = p.winner ? `<div class="sv2-row-winner">&#128081; ${escapeHtml(p.winner==='A'?teamNama(l.teamA):teamNama(l.teamB))}</div>` : '';
   let inputsHTML;
@@ -3232,7 +3464,7 @@ function sv2RowHTML(l, p, i, mode, colA, colB){
         <div class="sv2-row-pemain">
           <span style="color:${colA}">${escapeHtml(namaA||'-')}</span>
           <span style="color:#475569"> vs </span>
-          <span style="color:${colB}">${escapeHtml(namaB||'-')}</span>
+          <span style="color:${colB}">${escapeHtml(namaB||'-')}</span>${lockedIcon}
         </div>
         ${winnerLabel}
       </div>
@@ -3373,6 +3605,7 @@ function updateSetScore(partaiIdx, setIdx, teamIdx, val){
   let winsA=0, winsB=0;
   p.sets.forEach(s=>{ if(s[0]>0||s[1]>0){ if(s[0]>s[1]) winsA++; else if(s[1]>s[0]) winsB++; } });
   p.winner = winsA>=2 ? 'A' : (winsB>=2 ? 'B' : null);
+  lockPemainMain_(l, p);
   recalcLagaResult(l);
   saveDB();
   syncToGoogleSheet('SKOR','update', l);
@@ -3386,6 +3619,7 @@ function updateScore42(partaiIdx, teamIdx, val){
   p.score42[teamIdx] = Math.max(0, parseInt(val,10)||0);
   const a=p.score42[0], b=p.score42[1];
   p.winner = (a>0||b>0) ? (a>b?'A':(b>a?'B':null)) : null;
+  lockPemainMain_(l, p);
   recalcLagaResult(l);
   saveDB();
   syncToGoogleSheet('SKOR','update', l);
