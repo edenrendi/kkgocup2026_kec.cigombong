@@ -741,20 +741,32 @@ function renderPublicBagan(){
   window._publicPanelMode = 'bagan';
   /* Bagan (bracket) & Jadwal Pertandingan ditampilkan berdampingan supaya
      peserta bisa langsung memantau jalannya turnamen: lihat posisi tim di
-     bagan SEKALIGUS jam mainnya, tanpa harus berpindah halaman. Di layar
-     sempit (HP), jadwal otomatis pindah ke bawah bagan (grid-cols-1). */
+     bagan SEKALIGUS jam mainnya & kategori yang sedang dimainkan, tanpa
+     harus berpindah halaman. Di layar sempit (HP), jadwal otomatis pindah
+     ke bawah bagan (grid-cols-1).
+     Tombol "Download" di kedua panel memanggil LANGSUNG fungsi cetak yang
+     sama persis dipakai admin (printBagan/printJadwal) -- supaya file yang
+     diunduh peserta 100% identik dengan yang diunduh admin (1 lembar,
+     hitam-putih standar, tanpa kolom Aksi). Tampilan on-screen (yang ini,
+     view) sengaja dibuat lebih kaya -- berwarna per Partai + penanda LIVE --
+     tapi itu TIDAK ikut ke hasil unduhan. */
   document.getElementById('publicPanel').innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
     <div class="lg:col-span-3 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
-      <div class="flex justify-end mb-3 no-print"><button onclick="printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-print"></i> Cetak / Unduh PDF</button></div>
+      <div class="flex items-center justify-between mb-3 no-print">
+        <div class="font-display font-semibold text-sm"><i class="fa-solid fa-diagram-project text-primary mr-1.5"></i>Bagan Pertandingan</div>
+        <button onclick="printBagan()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
+      </div>
       <div id="publicBaganBox"></div>
     </div>
-    <div class="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800 no-print">
-      <div class="flex items-center justify-between mb-1">
-        <div class="font-display font-semibold text-sm"><i class="fa-solid fa-calendar-days text-primary mr-1.5"></i>Jadwal Pertandingan</div>
-        <span id="publicJadwalLiveDot" class="hidden items-center gap-1 text-[10px] font-bold text-red-500"><span class="jdw-live-dot"></span> LIVE</span>
+    <div class="lg:col-span-2 bg-white dark:bg-zinc-900 rounded-xl2 p-5 shadow-softer border border-zinc-100 dark:border-zinc-800">
+      <div class="flex items-center justify-between mb-1 no-print">
+        <div class="font-display font-semibold text-sm flex items-center gap-1.5"><i class="fa-solid fa-calendar-days text-primary"></i>Jadwal Pertandingan
+          <span id="publicJadwalLiveDot" class="hidden items-center gap-1 text-[10px] font-bold text-red-500 ml-1"><span class="jdw-live-dot"></span> LIVE</span>
+        </div>
+        <button onclick="printJadwal()" class="btn-ghost text-xs"><i class="fa-solid fa-download"></i> Download</button>
       </div>
-      <div class="text-[11px] text-zinc-400 mb-3">Pertandingan yang sedang berlangsung ditandai merah menyala.</div>
-      <div id="publicJadwalRingkas" class="space-y-2 max-h-[560px] overflow-y-auto pr-1"></div>
+      <div class="text-[11px] text-zinc-400 mb-3 no-print">Tiap Partai diberi warna berbeda; kategori yang sedang berlangsung menyala merah.</div>
+      <div id="publicJadwalRingkas" class="max-h-[560px] overflow-auto pr-1 -mx-1 px-1"></div>
     </div>
   </div>`;
   drawBagan('publicBaganBox', false);
@@ -764,14 +776,17 @@ function renderPublicBagan(){
      berpindah begitu jamnya lewat, tanpa peserta perlu refresh halaman. */
   window._publicJadwalLiveTimer = setInterval(renderPublicJadwalRingkas_, 20000);
 }
-/* ---------- Jadwal ringkas (publik, di sebelah Bagan) ----------
+/* ---------- Jadwal (publik, di sebelah Bagan) ----------
    Menentukan apakah sebuah PARTAI sedang berlangsung SEKARANG, berdasarkan:
    1) status 'Sedang Main' yang diset otomatis begitu admin mulai mengisi
       skor (lihat simpanSkor ~ l.status='Sedang Main'), ATAU
    2) jam yang dijadwalkan admin (tanggal = hari ini & waktu sekarang berada
       di antara jam mulai Main pertama s/d jam selesai Main terakhir Partai
       itu) -- supaya peserta tetap bisa memantau "partai mana yang sedang
-      jalan" dari jadwal, sekalipun admin belum sempat klik input skor. */
+      jalan" dari jadwal, sekalipun admin belum sempat klik input skor.
+   Dipakai untuk titik "LIVE" ringkasan di judul panel; highlight per-baris
+   kategori yang lebih presisi (per Main, bukan per Partai) dihitung
+   langsung di dalam buildJadwalTableHTML (parameter publicMode). */
 function isPartaiLiveNow_(l){
   if(l.status==='Sedang Main') return true;
   if(l.status==='Selesai') return false;
@@ -784,30 +799,6 @@ function isPartaiLiveNow_(l){
   const now = nowTime();
   return now>=l.jam && now<=selesai;
 }
-function buildPublicJadwalListHTML_(){
-  const rows = DB.laga.slice().sort((a,b)=> jadwalSortKey(a)-jadwalSortKey(b));
-  if(!rows.length) return emptyState('fa-calendar-days','Belum ada jadwal','Jadwal akan tampil di sini setelah admin membuat Bagan & mengatur jadwal pertandingan.');
-  return rows.map(l=>{
-    const pk = partaiKe(l);
-    const live = isPartaiLiveNow_(l);
-    const items = (l.partai&&l.partai.length) ? l.partai : [null];
-    const n = items.length;
-    const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
-    const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
-    const jamRange = l.jam ? `${l.jam}\u2013${addMinutesToTime(l.jam, (n-1)*spacing + durasiMain)}` : 'Jam belum diatur';
-    const statusBadge = live
-      ? `<span class="shrink-0 badge bg-red-500/90 text-white text-[10px] font-bold"><i class="fa-solid fa-circle-play mr-1"></i>Sedang Main</span>`
-      : `<span class="shrink-0 badge text-[10px] ${l.status==='Selesai'?'bg-emerald-100 text-emerald-700':'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}">${escapeHtml(l.status||'Terjadwal')}</span>`;
-    return `<div class="jdw-ring-row ${live?'jdw-live-pulse':''} flex items-center justify-between gap-3 p-3 rounded-xl border ${live?'border-red-400/70':'border-zinc-100 dark:border-zinc-800'}">
-      <div class="min-w-0">
-        <div class="text-[10px] uppercase tracking-wide text-zinc-400 font-semibold truncate">${escapeHtml(l.ronde||'')}${pk?` \u00B7 Partai ${pk}`:''}${l.lapangan?` \u00B7 Lap. ${escapeHtml(String(l.lapangan))}`:''}</div>
-        <div class="text-sm font-bold truncate">${escapeHtml(teamNama(l.teamA))} <span class="text-zinc-400 font-normal">vs</span> ${escapeHtml(teamNama(l.teamB))}</div>
-        <div class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">${l.tanggal?fmtDate(l.tanggal):'Tanggal belum diatur'} \u00B7 ${jamRange}</div>
-      </div>
-      ${statusBadge}
-    </div>`;
-  }).join('');
-}
 function renderPublicJadwalRingkas_(){
   const box = document.getElementById('publicJadwalRingkas');
   if(!box){
@@ -816,7 +807,11 @@ function renderPublicJadwalRingkas_(){
     if(window._publicJadwalLiveTimer){ clearInterval(window._publicJadwalLiveTimer); window._publicJadwalLiveTimer=null; }
     return;
   }
-  box.innerHTML = buildPublicJadwalListHTML_();
+  /* Memakai tabel Jadwal yang SAMA (buildJadwalTableHTML) dengan menu admin --
+     jadi kategori tiap Main, nama pemain, & skor ikut tampil (bukan cuma nama
+     Team) -- hanya ditambah mode publik (warna per Partai + highlight LIVE
+     per kategori) lewat parameter publicMode=true. */
+  box.innerHTML = `<table class="w-full border-collapse text-[11px]" style="table-layout:fixed">${buildJadwalTableHTML(false, true)}</table>`;
   const anyLive = DB.laga.some(isPartaiLiveNow_);
   const dot = document.getElementById('publicJadwalLiveDot');
   if(dot) dot.classList.toggle('hidden', !anyLive);
@@ -2395,7 +2390,7 @@ function renderJadwalTable(){
    meng-clone elemen #jdwTable yang sudah ada di layar \u2014 supaya hasil cetak
    selalu pasti terisi (tidak pernah blank/kosong) walau tabel di layar
    sedang di-scale, ter-scroll, atau DOM-nya belum sempat diukur. */
-function buildJadwalTableHTML(forPrint){
+function buildJadwalTableHTML(forPrint, publicMode){
   /* Urutan jadwal WAJIB mengikuti urutan Partai di bagan (Partai 1 = Slot A vs B,
      Partai 2 = C vs D, Partai 3 = E vs F, Partai 4 = G vs H, lalu Semi Final,
      lalu Final) \u2014 bukan diurutkan berdasarkan tanggal/jam, supaya lawan tidak
@@ -2425,6 +2420,14 @@ function buildJadwalTableHTML(forPrint){
   let lastDate = undefined;
   let mainKeCounter = 0;
   const bodyRows = [];
+  /* publicMode=true dipakai HANYA untuk tampilan Jadwal di halaman awal
+     (lihat renderPublicJadwalRingkas_) -- SETIAP Partai diberi warna berbeda
+     (dari palet UNDIAN_COLORS yang sama dipakai menu Undian, biar konsisten)
+     supaya peserta mudah membedakan kelompok pertandingan sekilas mata.
+     TIDAK berlaku saat forPrint (download PDF) -- hasil unduhan tetap
+     hitam-putih standar, identik dengan yang admin unduh di menu Jadwal. */
+  const partaiColorMap = {};
+  let colorCounter = 0;
   rows.forEach(l=>{
     if(l.tanggal !== lastDate){
       lastDate = l.tanggal;
@@ -2435,12 +2438,20 @@ function buildJadwalTableHTML(forPrint){
     const n = items.length;
     const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
     const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+    if(publicMode && !partaiColorMap[l.id]){ partaiColorMap[l.id] = UNDIAN_COLORS[colorCounter % UNDIAN_COLORS.length]; colorCounter++; }
+    const pColor = publicMode ? partaiColorMap[l.id] : null;
     items.forEach((p,idx)=>{
       mainKeCounter++;
       const isFirst = idx===0;
-      const trCls = isFirst ? ' class="jdw-partai-start"' : '';
       const mulai = l.jam ? addMinutesToTime(l.jam, idx*spacing) : null;
       const jamCell = mulai ? `${mulai}\u2013${addMinutesToTime(mulai,durasiMain)}` : '-';
+      /* Sedang berlangsung SEKARANG = per kategori (Main), bukan per Partai
+         \u2014 supaya di antara 5 Main dalam 1 Partai, hanya baris kategori yang
+         jamnya benar-benar sedang berjalan yang menyala merah. */
+      const isLiveMain = publicMode && mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain);
+      const rowClasses = [isFirst?'jdw-partai-start':'', isLiveMain?'jdw-live-pulse':''].filter(Boolean).join(' ');
+      const rowStyle = pColor ? ` style="background:${pColor}1A"` : '';
+      const trCls = rowClasses ? ` class="${rowClasses}"` : '';
       /* Nama pemain di kolom Kategori bisa disamarkan (garis titik-titik)
          lewat tombol "Nama Pemain: Aktif/Nonaktif" di atas tabel (lihat
          toggleTampilanNamaPemainJadwal). Default AKTIF (tampil apa adanya). */
@@ -2449,7 +2460,7 @@ function buildJadwalTableHTML(forPrint){
       const namaA = p ? (namaPemainAktif ? (partaiPemainNama(l.teamA, p.kategoriId) || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const namaB = p ? (namaPemainAktif ? (partaiPemainNama(l.teamB, p.kategoriId) || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const kategoriCell = p
-        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug">${namaA} <span class="text-zinc-400 font-normal">vs</span> ${namaB}</div>`
+        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug">${namaA} <span class="text-zinc-400 font-normal">vs</span> ${namaB}</div>`
         : '<span class="text-zinc-300 text-[11px]">-</span>';
       /* Skor per kategori (Main) \u2014 bukan skor akhir Partai. Tampilkan "-" jika
          kategori tersebut belum diisi skornya sama sekali, dan tampilkan
@@ -2461,13 +2472,13 @@ function buildJadwalTableHTML(forPrint){
          bawah) supaya tidak melebar & menutup/mendesak kolom lain. Kolom
          Pertandingan hanya menampilkan nama Team saja (tanpa kode Slot
          A/B/dst) supaya lebih ringkas dan tidak menghalangi. */
-      const rondeCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}">${l.ronde}${pk?`<div class="text-zinc-400 mt-0.5">Partai ke ${pk}</div>`:''}</td>` : '';
+      const rondeCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}"${rowStyle}>${l.ronde}${pk?`<div class="text-zinc-400 mt-0.5">Partai ke ${pk}</div>`:''}</td>` : '';
       const hariNama = l.tanggal ? fmtDateFull(l.tanggal).split(',')[0] : '';
       const tglNama = l.tanggal ? fmtDateFull(l.tanggal).split(', ')[1] : '-';
-      const tglCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}">${l.tanggal?`<div class="font-semibold">${hariNama}</div><div class="text-zinc-500 dark:text-zinc-400 mt-0.5">${tglNama}</div>`:'-'}</td>` : '';
-      const pertandinganCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}" style="font-size:14px;font-weight:800">${escapeHtml(teamNama(l.teamA))} <span class="text-zinc-400 font-normal" style="font-size:11px;font-weight:600">vs</span> ${escapeHtml(teamNama(l.teamB))}</td>` : '';
+      const tglCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}"${rowStyle}>${l.tanggal?`<div class="font-semibold">${hariNama}</div><div class="text-zinc-500 dark:text-zinc-400 mt-0.5">${tglNama}</div>`:'-'}</td>` : '';
+      const pertandinganCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}"${rowStyle} style="font-size:14px;font-weight:800">${escapeHtml(teamNama(l.teamA))} <span class="text-zinc-400 font-normal" style="font-size:11px;font-weight:600">vs</span> ${escapeHtml(teamNama(l.teamB))}</td>` : '';
       const aksiCell = showAksi ? (isFirst ? `<td class="${td} jdw-rowspan text-right no-print" rowspan="${n}"><button onclick="jadwalForm('${l.id}')" class="icon-btn text-primary"><i class="fa-solid fa-pen"></i></button></td>` : '') : '';
-      bodyRows.push(`<tr${trCls}>
+      bodyRows.push(`<tr${trCls}${rowStyle}>
         ${rondeCell}
         ${tglCell}
         <td class="${td} whitespace-nowrap text-center">${jamCell}</td>
