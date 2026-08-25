@@ -279,7 +279,11 @@ function scheduleCloudPush(){
      dititipkan lewat perangkat admin. */
   if(!isAdmin()) return;
   clearTimeout(_cloudPushTimer);
-  _cloudPushTimer = setTimeout(pushDBToCloud, 1500);
+  _cloudPushTimer = setTimeout(pushDBToCloud, 600); /* PERBAIKAN: dulu 1.5 detik -> perubahan
+    admin (skor, jadwal, dll) sengaja ditunda dulu sebelum mulai dikirim ke server, menambah
+    jeda sebelum peserta lain bisa menariknya. Dipersingkat jadi 600ms (masih cukup untuk
+    menggabungkan beberapa perubahan beruntun jadi 1 kali kirim, supaya tidak spam) supaya
+    proses pengiriman ke server dimulai lebih cepat setelah admin berhenti mengetik/klik. */
 }
 async function pushDBToCloud(){
   if(!cloudSyncEnabled() || _cloudPushing) return;
@@ -439,12 +443,19 @@ async function updatePesertaToCloud_(pesertaArr, nomorRegistrasi){
    Ditunda kalau: sedang ada modal/formulir terbuka (supaya tidak menimpa
    apa yang sedang diketik admin), atau sedang ada pengiriman data yang
    masih tertunda (supaya perubahan lokal tidak keburu tertimpa data lama). */
-const CLOUD_PULL_INTERVAL_MS = 10000; /* PERBAIKAN: dulu 45 detik -> perubahan admin (mis. ubah
-  jumlah/nama Gugus) baru terlihat oleh peserta lain setelah puluhan detik s/d beberapa menit,
-  terutama kalau layar peserta sedang tidak aktif/dibackground (throttle browser) lalu baru
-  tertangkap saat tab kembali fokus. 10 detik memberi rasa "hampir realtime" tanpa membebani
-  kuota eksekusi Apps Script secara berlebihan (lihat juga perbaikan rerenderCurrentView()
-  di bawah, supaya hasil tarikan tiap 10 detik ini benar-benar dipakai memperbarui layar). */
+const CLOUD_PULL_INTERVAL_MS = 4000; /* PERBAIKAN: dulu 45 detik, lalu 10 detik -> peserta masih
+  merasakan jeda/delay antara admin meng-input data (skor, jadwal, undian, dll) dengan data itu
+  benar-benar muncul di layar peserta lain yang sudah membuka link, karena peserta harus
+  menunggu sampai giliran tarikan otomatis berikutnya datang (rata-rata setengah dari nilai
+  interval ini, ditambah waktu respons server Apps Script + jeda pengiriman admin di atas).
+  Dipersingkat jadi 4 detik supaya terasa nyaris realtime -- inilah batas paling pendek yang
+  wajar dipakai terus-menerus oleh BANYAK layar peserta sekaligus tanpa membebani/melampaui
+  kuota eksekusi harian Google Apps Script (lihat juga perbaikan rerenderCurrentView() di
+  bawah, supaya hasil tarikan tiap beberapa detik ini benar-benar dipakai memperbarui layar,
+  dan visibilitychange/focus di bawah supaya begitu tab dibuka lagi langsung ditarik seketika,
+  tidak menunggu giliran interval berikutnya). Google Apps Script sendiri tidak mendukung
+  push/websocket, jadi cara "tarik data berkala" (polling) inilah metode tercepat yang mungkin
+  dilakukan tanpa mengganti infrastruktur backend ke layanan realtime khusus (mis. Firebase). */
 function isModalOpen_(){
   const el = document.getElementById('modalRoot');
   return !!(el && el.innerHTML.trim() !== '');
@@ -788,9 +799,12 @@ function renderPublicBagan(){
   drawBagan('publicBaganBox', false);
   renderPublicJadwalRingkas_();
   if(window._publicJadwalLiveTimer) clearInterval(window._publicJadwalLiveTimer);
-  /* Disegarkan tiap 20 detik supaya highlight "sedang bertanding" otomatis
-     berpindah begitu jamnya lewat, tanpa peserta perlu refresh halaman. */
-  window._publicJadwalLiveTimer = setInterval(renderPublicJadwalRingkas_, 20000);
+  /* Disegarkan tiap 5 detik (dulu 20 detik) supaya highlight "sedang bertanding"
+     otomatis berpindah begitu jamnya lewat, selaras dengan kecepatan tarikan
+     data cloud (CLOUD_PULL_INTERVAL_MS) yang juga sudah dipercepat -- ini
+     hanya menggambar ulang dari data yang SUDAH ada di memori (tidak memanggil
+     server), jadi aman dipercepat tanpa menambah beban ke Apps Script. */
+  window._publicJadwalLiveTimer = setInterval(renderPublicJadwalRingkas_, 5000);
 }
 /* Buka/tutup (dropdown) panel Bagan / Jadwal Pertandingan di halaman awal --
    supaya peserta bisa menyembunyikan panel yang sedang tidak diperlukan
@@ -3910,6 +3924,19 @@ function doPost(e) {
       const result = registerPesertaAtomic_(body);
       return jsonOutput_(result);
     }
+    if (body.action === 'updatepeserta') {
+      /* PERBAIKAN: dulu action ini TIDAK PERNAH ditangani di sini -- otomatis
+       * jatuh ke cabang "Kompatibilitas lama" di bawah, yang hanya menulis
+       * ke satu tab Sheet (arsip) dan TIDAK PERNAH memperbarui db_current.json
+       * (sumber data utama yang dibaca semua perangkat lewat ?action=getdb).
+       * Akibatnya, kalau peserta memperbaiki data pendaftarannya sendiri
+       * (mis. salah ketik nama), perbaikan itu tidak pernah benar-benar
+       * tersimpan ke database utama -- dan sewaktu-waktu bisa tertimpa balik
+       * begitu admin menyimpan sesuatu (savedb menimpa seluruh database).
+       * Sekarang ditangani atomik & terkunci sama seperti registerpeserta. */
+      const result = updatePesertaAtomic_(body);
+      return jsonOutput_(result);
+    }
     if (body.action === 'savedb') {
       writeDBLocked_(body.db);
       return jsonOutput_({ ok: true, savedAt: new Date().toISOString() });
@@ -3948,11 +3975,46 @@ function readDB_() {
 }
 
 function writeDB_(db) {
+  /* PERBAIKAN UTAMA PENYEBAB DELAY: dulu SETIAP kali admin menyimpan
+   * perubahan apa pun (termasuk tiap kali klik tambah skor 1 poin), fungsi
+   * ini SELALU membuat file backup baru + membaca/menyortir SEMUA file di
+   * folder untuk pruning + menulis ulang 5 sheet Google Sheets penuh
+   * (PESERTA, TEAM, JADWAL_LAGA, LOG_AKTIVITAS, INFO) sebelum permintaan
+   * dianggap selesai. Semua itu adalah panggilan Drive/Sheets API yang
+   * lambat (bisa beberapa detik) -- padahal yang benar-benar dibutuhkan
+   * SEGERA oleh peserta lain (lewat endpoint ?action=getdb, lihat readDB_)
+   * hanyalah file db_current.json ter-update. Sekarang HANYA db_current.json
+   * (sumber data utama yang dibaca semua perangkat) yang ditulis SETIAP
+   * kali -- cepat, cukup 1 panggilan Drive. Backup bertanggal & mirror ke
+   * Sheets (yang hanya untuk arsip/dilihat manual, TIDAK pernah dibaca balik
+   * oleh aplikasi) dipindah ke throttleMirrorAndBackup_() dan hanya benar-
+   * benar dijalankan paling cepat 1x per menit -- jadi tetap ada backup &
+   * sheet ter-update berkala, tanpa memperlambat SETIAP simpanan. Hasilnya:
+   * begitu admin menyimpan, peserta lain yang menarik data (polling tiap
+   * beberapa detik di app.js) langsung mendapat data terbaru jauh lebih
+   * cepat, karena server tidak lagi menunggu proses backup/mirror selesai. */
   const folder = getBackupFolder_();
   const json = JSON.stringify(db);
   const it = folder.getFilesByName('db_current.json');
   if (it.hasNext()) it.next().setContent(json);
   else folder.createFile('db_current.json', json, MimeType.PLAIN_TEXT);
+  throttleMirrorAndBackup_(folder, db, json);
+}
+
+/* ---------- Backup bertanggal & mirror ke Sheets: DITUNDA, bukan tiap simpan ----------
+ * Dijalankan paling cepat 1x per menit (MIRROR_THROTTLE_MS), dicatat lewat
+ * PropertiesService supaya tetap berlaku walau permintaan datang dari
+ * eksekusi/perangkat berbeda-beda. Kalau belum waktunya, dilewati dulu --
+ * db_current.json (data yang benar-benar dipakai aplikasi) tetap selalu
+ * ter-update di setiap panggilan writeDB_ di atas, jadi tidak ada data yang
+ * hilang, hanya BACKUP & TAMPILAN SHEET-nya saja yang menyusul belakangan. */
+const MIRROR_THROTTLE_MS = 60000;
+function throttleMirrorAndBackup_(folder, db, json) {
+  const props = PropertiesService.getScriptProperties();
+  const last = Number(props.getProperty('lastMirrorAt') || 0);
+  const now = Date.now();
+  if (now - last < MIRROR_THROTTLE_MS) return;
+  props.setProperty('lastMirrorAt', String(now));
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'GMT+7', 'yyyyMMdd_HHmmss');
   folder.createFile('db_backup_' + stamp + '.json', json, MimeType.PLAIN_TEXT);
   pruneBackups_(folder);
@@ -4034,6 +4096,40 @@ function registerPesertaAtomic_(body) {
 
     writeDB_(db);
     return { ok: true, added: addedCount, savedAt: new Date().toISOString() };
+  });
+}
+
+/* ---------- Perbaikan data sendiri (peserta publik): diperbarui LANGSUNG di
+ * data server ----- sama seperti registerPesertaAtomic_ di atas, tapi HANYA
+ * mengubah baris peserta yang id-nya cocok (tidak menambah baris baru, tidak
+ * menyentuh peserta lain), di dalam kunci (lock) supaya tidak saling
+ * menimpa dengan permintaan lain yang datang hampir bersamaan. */
+function updatePesertaAtomic_(body) {
+  return withDbLock_(function () {
+    let db = readDB_();
+    if (!db) db = { users: [], gugus: [], teams: [], peserta: [], laga: [], baganMeta: { generated: false, order: [] }, juaraTeamId: null, logs: [], settings: {} };
+    if (!Array.isArray(db.peserta)) db.peserta = [];
+
+    const incoming = Array.isArray(body.peserta) ? body.peserta : [];
+    let updatedCount = 0;
+    incoming.forEach(function (p) {
+      if (!p || !p.id) return;
+      const idx = db.peserta.findIndex(function (x) { return x && x.id === p.id; });
+      if (idx > -1) { db.peserta[idx] = p; updatedCount++; }
+    });
+
+    if (!Array.isArray(db.logs)) db.logs = [];
+    db.logs.unshift({
+      id: 'log-' + new Date().getTime() + '-' + Math.random().toString(36).slice(2, 8),
+      waktu: new Date().toISOString(),
+      jenis: 'Pendaftaran',
+      ket: 'Peserta memperbarui ' + updatedCount + ' data sendiri' + (body.nomorRegistrasi ? ' (' + body.nomorRegistrasi + ')' : ''),
+      user: 'Sistem'
+    });
+    db.logs = db.logs.slice(0, 200);
+
+    writeDB_(db);
+    return { ok: true, updated: updatedCount, savedAt: new Date().toISOString() };
   });
 }
 
