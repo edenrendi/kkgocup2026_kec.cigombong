@@ -1212,15 +1212,49 @@ span.badmintime-title *,
   color:#fff; font-size:12px; flex:none; box-shadow:0 3px 10px -4px rgba(0,0,0,.5);
 }
 .public-panel-btn-group{ display:flex; align-items:center; gap:6px; }
-
-/* Tabel Jadwal publik dipercantik: header gradasi, baris zebra & rapi, tanpa
-   mengubah logika/isi data (tetap memakai buildJadwalTableHTML yang sama
-   dipakai admin & hasil cetak -- supaya data selalu konsisten & akurat). */
-#publicJadwalRingkas table thead tr{ background: linear-gradient(135deg,#FFE7EA,#FFF6F2) !important; }
-.dark #publicJadwalRingkas table thead tr{ background: linear-gradient(135deg,rgba(225,18,47,.22),rgba(225,18,47,.08)) !important; }
-#publicJadwalRingkas table thead th{ font-family:'Poppins',sans-serif; font-weight:800 !important; letter-spacing:.03em; text-transform:uppercase; font-size:9.5px !important; }
-#publicJadwalRingkas table tbody tr:nth-child(even):not(.jdw-live-pulse){ background: rgba(148,163,184,.045); }
-#publicJadwalRingkas table td, #publicJadwalRingkas table th{ border-color: rgba(148,163,184,.25) !important; }
-#publicJadwalRingkas table tr.jdw-partai-start > td{ border-top: 2.5px solid var(--panel-accent,#E1122F) !important; }
-#publicJadwalRingkas{ border-radius:12px; overflow:hidden; border:1px solid rgba(148,163,184,.22); }
 #publicBaganBox{ border-radius:12px; }
+
+/* ===================== PUBLIC: Jadwal Pertandingan RINGKAS (kartu) =====================
+   Tampilan sederhana & ringkas khusus layar (bukan tabel admin) supaya rapi
+   dan tidak terpotong di layar HP -- tetap menampilkan kategori pertandingan
+   & status tiap kategori (belum main/LIVE/selesai + skor ringkas). Format
+   lengkap ala admin tetap dipakai untuk hasil UNDUH (lihat previewJadwal &
+   printJadwal di app.js). */
+.pjc-list{ display:flex; flex-direction:column; gap:10px; }
+.pjc-date-sep{
+  font-size:10.5px; font-weight:800; color:#E1122F; text-transform:uppercase; letter-spacing:.03em;
+  padding:2px 2px; margin-top:4px;
+}
+.pjc-date-sep:first-child{ margin-top:0; }
+.dark .pjc-date-sep{ color:#FF6B7D; }
+.pjc-card{
+  border-radius:12px; border:1px solid #ECECEF; background:linear-gradient(180deg,#ffffff,#FAFAFB);
+  padding:11px 12px; transition:box-shadow .15s ease, border-color .15s ease;
+}
+.dark .pjc-card{ background:linear-gradient(180deg,#16161C,#101014); border-color:#26262E; }
+.pjc-card:hover{ box-shadow:0 4px 14px -6px rgba(11,11,15,.16); }
+.pjc-card.pjc-live{ border-color:rgba(225,18,47,.5); background:linear-gradient(180deg,#FFF4F5,#FFFFFF); box-shadow:0 0 0 1px rgba(225,18,47,.15); }
+.dark .pjc-card.pjc-live{ background:linear-gradient(180deg,rgba(225,18,47,.16),#101014); }
+.pjc-top{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+.pjc-partai-badge{ font-size:10px; font-weight:800; letter-spacing:.02em; padding:3px 9px; border-radius:999px; background:#F1F5F9; color:#334155; }
+.dark .pjc-partai-badge{ background:#1F2937; color:#CBD5E1; }
+.pjc-jam{ font-family:'JetBrains Mono',monospace; font-size:10.5px; font-weight:700; color:#71717A; white-space:nowrap; }
+.pjc-live-badge{ display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:800; color:#E1122F; white-space:nowrap; }
+.pjc-teams{ display:flex; align-items:center; justify-content:space-between; gap:6px; font-family:'Poppins',sans-serif; font-weight:700; font-size:12.5px; margin-bottom:8px; }
+.pjc-team{ display:flex; align-items:center; gap:6px; min-width:0; flex:1; }
+.pjc-team-b{ justify-content:flex-end; text-align:right; }
+.pjc-dot{ width:8px; height:8px; border-radius:999px; flex:none; }
+.pjc-team-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pjc-vs{ font-size:9.5px; color:#A1A1AA; font-weight:700; flex:none; }
+.pjc-kategori-list{ display:flex; flex-wrap:wrap; gap:5px; }
+.pjc-kat-chip{
+  display:flex; align-items:center; gap:6px; font-size:9.5px; font-weight:700; padding:3px 8px;
+  border-radius:999px; background:#F4F4F5; color:#52525B;
+}
+.dark .pjc-kat-chip{ background:#1E1E26; color:#A1A1AA; }
+.pjc-kat-chip .pjc-kat-score{ font-family:'JetBrains Mono',monospace; opacity:.9; }
+.pjc-kat-chip.pjc-kat-done{ background:#DCFCE7; color:#15803D; }
+.dark .pjc-kat-chip.pjc-kat-done{ background:rgba(22,163,74,.18); color:#4ADE80; }
+.pjc-kat-chip.pjc-kat-live{ background:#FEE2E2; color:#DC2626; animation:pjcLivePulse 1.4s ease-in-out infinite; }
+.dark .pjc-kat-chip.pjc-kat-live{ background:rgba(220,38,38,.22); color:#FCA5A5; }
+@keyframes pjcLivePulse{ 0%,100%{ opacity:1; } 50%{ opacity:.55; } }
