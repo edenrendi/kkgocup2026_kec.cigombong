@@ -1140,21 +1140,27 @@ span.badmintime-title *,
   }
 
 /* ---------- Jadwal Pertandingan Publik: penanda "sedang bertanding" ----------
-   Dipakai oleh buildPublicJadwalListHTML_() di app.js (panel Jadwal Pertandingan
-   di sebelah Bagan pada halaman awal) untuk menyorot partai yang jamnya sedang
-   berjalan SEKARANG, supaya peserta bisa langsung melihat pertandingan mana yang
-   sedang berlangsung tanpa perlu membaca satu-satu jam di tabel. */
+   Dipakai oleh buildJadwalTableHTML(forPrint, publicMode=true) di app.js
+   (tabel Jadwal Pertandingan di sebelah Bagan pada halaman awal) untuk
+   menyorot baris KATEGORI (Main) yang jamnya sedang berjalan SEKARANG,
+   supaya peserta bisa langsung melihat kategori mana yang sedang
+   berlangsung tanpa perlu membaca satu-satu jam di tabel. Kelas ini
+   dipasang pada elemen <tr>; animasi background/box-shadow-nya sengaja
+   ditarget ke elemen <td> di dalamnya (bukan langsung ke <tr>) karena
+   box-shadow pada <tr> tidak konsisten dirender oleh semua browser dalam
+   tabel dengan border-collapse. */
 .jdw-live-pulse {
-  position: relative;
-  background: rgba(225, 18, 47, 0.08);
-  animation: jdwLivePulse 1.8s ease-in-out infinite;
+  background: rgba(225, 18, 47, 0.10);
 }
 .dark .jdw-live-pulse {
-  background: rgba(225, 18, 47, 0.16);
+  background: rgba(225, 18, 47, 0.18);
 }
-@keyframes jdwLivePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 18, 47, 0.35); }
-  50% { box-shadow: 0 0 0 7px rgba(225, 18, 47, 0); }
+.jdw-live-pulse > td {
+  animation: jdwLivePulseTd 1.7s ease-in-out infinite;
+}
+@keyframes jdwLivePulseTd {
+  0%, 100% { background-color: rgba(225, 18, 47, 0.10); box-shadow: inset 0 0 0 1px rgba(225,18,47,.35); }
+  50% { background-color: rgba(225, 18, 47, 0.28); box-shadow: inset 0 0 0 1px rgba(225,18,47,.6); }
 }
 .jdw-live-dot {
   width: 7px;
