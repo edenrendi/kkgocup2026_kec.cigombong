@@ -284,6 +284,23 @@ function scheduleCloudPush(){
      langsung dikirim dari perangkat peserta itu sendiri ke server -- bukan
      dititipkan lewat perangkat admin. */
   if(!isAdmin()) return;
+  /* PERBAIKAN "kadang lama, kadang tidak tersimpan": kalau ADA pengiriman
+     sebelumnya yang masih berjalan (mis. DB besar berisi banyak foto
+     peserta/cadangan sehingga upload-nya lambat), dulu timer baru ini tetap
+     dipasang 600ms lalu memanggil pushDBToCloud() -- yang begitu dicek
+     _cloudPushing masih true, LANGSUNG return tanpa mengirim apa pun DAN
+     tanpa menjadwalkan ulang. Akibatnya perubahan yang dibuat SELAGI
+     pengiriman sebelumnya masih berjalan (mis. klik toggle Nama Pemain
+     Aktif/Nonaktif tepat saat perubahan lain sebelumnya masih terkirim)
+     bisa hilang sama sekali dari server sampai ada perubahan lain yang
+     memicu pengiriman berikutnya. Sekarang: kalau sedang ada pengiriman
+     berjalan, jangan pasang timer baru -- cukup tandai _cloudPushPending,
+     lalu begitu pengiriman yang sedang berjalan itu SELESAI (lihat blok
+     finally di pushDBToCloud), otomatis dijadwalkan pengiriman susulan
+     yang membawa DB TERBARU (sudah termasuk perubahan yang sempat
+     tertunda ini) -- supaya tidak pernah ada perubahan yang diam-diam
+     tidak tersimpan ke server. */
+  if(_cloudPushing){ _cloudPushPending = true; return; }
   clearTimeout(_cloudPushTimer);
   _cloudPushTimer = setTimeout(pushDBToCloud, 600); /* PERBAIKAN: dulu 1.5 detik -> perubahan
     admin (skor, jadwal, dll) sengaja ditunda dulu sebelum mulai dikirim ke server, menambah
@@ -291,9 +308,11 @@ function scheduleCloudPush(){
     menggabungkan beberapa perubahan beruntun jadi 1 kali kirim, supaya tidak spam) supaya
     proses pengiriman ke server dimulai lebih cepat setelah admin berhenti mengetik/klik. */
 }
+let _cloudPushPending = false;
 async function pushDBToCloud(){
   if(!cloudSyncEnabled() || _cloudPushing) return;
   _cloudPushing = true;
+  _cloudPushPending = false;
   window._cloudStatus.state='syncing'; updateCloudStatusUI();
   try{
     const res = await fetch(DB.settings.gasUrl, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify({action:'savedb', db: DB}) });
@@ -310,6 +329,10 @@ async function pushDBToCloud(){
       selamanya "masih ada kiriman tertunda" dan tidak pernah menarik data terbaru lagi
       setelah pengiriman pertama ke cloud. */
     updateCloudStatusUI();
+    /* Ada perubahan yang masuk SELAGI pengiriman ini berjalan (lihat
+       scheduleCloudPush di atas) -- langsung jadwalkan pengiriman susulan
+       supaya perubahan itu tetap terkirim, bukan diam-diam terlewat. */
+    if(_cloudPushPending){ _cloudPushPending = false; scheduleCloudPush(); }
   }
 }
 async function pullDBFromCloud(silent){
@@ -1847,7 +1870,6 @@ function renderPesertaTable(){
         <button onclick="toggleGugus('${escapeHtml(g)}')" class="shrink-0 px-1"><i class="fa-solid fa-chevron-${open?'up':'down'} text-xs text-zinc-400"></i></button>
       </div>
       <div class="${open?'':'hidden'} border-t border-zinc-200/70 dark:border-zinc-700">
-        ${renderCadanganListHTML_(g, groupCadangan)}
         ${groupIds.map(kid=>{
           const regRows=groupRows.filter(p=>p.kelompokId===kid);
           const first=regRows[0];
@@ -1888,6 +1910,7 @@ function renderPesertaTable(){
             </div>
           </div>`;
         }).join('')}
+        ${renderCadanganListHTML_(g, groupCadangan)}
       </div>
     </section>`;
   }).join('') || `<div class="bg-white/95 dark:bg-zinc-900 rounded-xl2 p-8 text-center text-zinc-400">${emptyState('fa-user-group','Belum ada peserta','Peserta akan muncul di sini setelah mendaftar lewat halaman publik.')}</div>`;
@@ -1901,7 +1924,7 @@ function renderPesertaTable(){
    sebagai "pool" cadangan yang bisa dipakai admin untuk menggantikan nama
    pemain berhalangan lewat kolom "Robah Pemain" (lihat robahPemainSelect). */
 function renderCadanganListHTML_(gugus, list){
-  return `<div class="p-3 md:p-4 bg-zinc-50/60 dark:bg-zinc-800/30 border-b border-zinc-200/70 dark:border-zinc-700">
+  return `<div class="p-3 md:p-4 bg-zinc-50/60 dark:bg-zinc-800/30 border-t border-zinc-200/70 dark:border-zinc-700">
     <div class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-300 uppercase tracking-wide mb-2"><i class="fa-solid fa-user-group text-zinc-400 mr-1"></i> Peserta Cadangan (${list.length})</div>
     ${list.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
       ${list.map(c=>`<div class="flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-2">
