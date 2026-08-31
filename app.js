@@ -119,6 +119,7 @@ function seedDB(){
     gugus: ['Gugus 1','Gugus 2','Gugus 3','Gugus 4'],
     teams,
     peserta: [],
+    cadangan: [],
     laga: [],
     baganMeta: { generated:false, order:[] },
     juaraTeamId: null,
@@ -174,6 +175,7 @@ function applyDBDefaults(){
   if(DB.settings.tampilkanNamaPemainJadwal===undefined) DB.settings.tampilkanNamaPemainJadwal=true;
   if(!DB.baganMeta) DB.baganMeta = { generated:false, order:[] };
   if(!Array.isArray(DB.gugus)) DB.gugus = ['Gugus 1','Gugus 2'];
+  if(!Array.isArray(DB.cadangan)) DB.cadangan = [];
   if(DB.juaraTeamId===undefined) DB.juaraTeamId = null;
   (DB.teams||[]).forEach((t,i)=>{
     if(!t.slotKey) t.slotKey = i<26 ? String.fromCharCode(65+i) : '';
@@ -1022,8 +1024,16 @@ function renderPublicJadwalRingkas_(){
         // roster kategori diedit admin belakangan. Selama belum selesai, tetap mengikuti
         // data pemain PALING BARU (live) -- termasuk kalau pemain yang sama juga terdaftar
         // di kategori lain (mis. Tunggal Putra sekaligus Ganda Campuran).
-        const namaA = pemainMainNama(l, p, 'A');
-        const namaB = pemainMainNama(l, p, 'B');
+        // PERBAIKAN: sebelumnya kartu ringkas di halaman awal ini SELALU menampilkan nama
+        // pemain apa adanya, tidak peduli admin sudah menonaktifkan tombol "Nama Pemain:
+        // Aktif/Nonaktif" di menu Jadwal admin (lihat toggleTampilanNamaPemainJadwal &
+        // DB.settings.tampilkanNamaPemainJadwal). Akibatnya nama tetap "bocor" ke halaman
+        // awal walau admin sudah menyembunyikannya di tabel Jadwal admin. Sekarang kedua
+        // tempat mengikuti pengaturan yang SAMA -- begitu dinonaktifkan, kartu di halaman
+        // awal ikut menyembunyikan nama pemain (kategori & skor tetap tampil seperti biasa).
+        const namaPemainAktifPublik = DB.settings.tampilkanNamaPemainJadwal !== false;
+        const namaA = namaPemainAktifPublik ? pemainMainNama(l, p, 'A') : '';
+        const namaB = namaPemainAktifPublik ? pemainMainNama(l, p, 'B') : '';
         const playersHtml = (namaA || namaB) ? `<div class="pjc-kat-players">
             ${namaA?`<div class="pjc-kat-player"><span class="pjc-kat-player-dot" style="background:${colorA}"></span>${escapeHtml(namaA)}</div>`:''}
             ${namaB?`<div class="pjc-kat-player"><span class="pjc-kat-player-dot" style="background:${colorB}"></span>${escapeHtml(namaB)}</div>`:''}
@@ -1814,11 +1824,14 @@ function renderPesertaTable(){
   let rows = DB.peserta.slice().sort((a,b)=> new Date(b.waktuDaftar)-new Date(a.waktuDaftar));
   if(pesertaFilter) rows = rows.filter(p=>(p.nama+p.asalSekolah+p.nomorRegistrasi+p.koordinator).toLowerCase().includes(pesertaFilter.toLowerCase()));
   if(filterPesertaGugus) rows = rows.filter(p=>p.gugus===filterPesertaGugus);
-  const groups = [...new Set(rows.map(p=>p.gugus||'Tanpa Gugus'))];
+  let cadRows = (DB.cadangan||[]).slice().sort((a,b)=> new Date(b.waktuDaftar)-new Date(a.waktuDaftar));
+  if(filterPesertaGugus) cadRows = cadRows.filter(c=>(c.gugus||'Tanpa Gugus')===filterPesertaGugus);
+  const groups = [...new Set([...rows.map(p=>p.gugus||'Tanpa Gugus'), ...cadRows.map(c=>c.gugus||'Tanpa Gugus')])];
   const wrap=document.getElementById('pesertaGugusContainer'); if(!wrap) return;
   wrap.innerHTML = groups.map((g,gi)=>{
     const color=gugusColor(g);
     const groupRows=rows.filter(p=>(p.gugus||'Tanpa Gugus')===g);
+    const groupCadangan=cadRows.filter(c=>(c.gugus||'Tanpa Gugus')===g);
     const open=openGugusState[g]!==false;
     const groupIds=[...new Set(groupRows.map(p=>p.kelompokId))];
     const pendingCount = groupRows.filter(p=>p.status==='Menunggu Verifikasi').length;
@@ -1826,13 +1839,15 @@ function renderPesertaTable(){
       <div class="w-full flex items-center gap-3 px-4 py-3">
         <button onclick="toggleGugus('${escapeHtml(g)}')" class="flex items-center gap-3 flex-1 min-w-0 text-left">
           <span class="w-3 h-3 rounded-full shrink-0" style="background:${color}"></span>
-          <div class="flex-1 min-w-0"><div class="font-display font-bold text-sm truncate">${escapeHtml(g)}</div><div class="text-[11px] text-zinc-400">${groupIds.length} pendaftaran \u00B7 ${groupRows.length} pemain</div></div>
+          <div class="flex-1 min-w-0"><div class="font-display font-bold text-sm truncate">${escapeHtml(g)}</div><div class="text-[11px] text-zinc-400">${groupIds.length} pendaftaran \u00B7 ${groupRows.length} pemain${groupCadangan.length?` \u00B7 ${groupCadangan.length} cadangan`:''}</div></div>
           <span class="badge shrink-0" style="background:${color};color:#fff">${groupRows.filter(p=>p.status==='Terverifikasi').length} terverifikasi</span>
         </button>
+        ${isAdmin() ? `<button onclick="event.stopPropagation();openTambahCadanganModal('${escapeHtml(g)}')" class="btn-ghost text-[11px] !py-1.5 !px-2.5 shrink-0" title="Tambah peserta cadangan untuk gugus ini"><i class="fa-solid fa-user-plus"></i> Cadangan</button>` : ''}
         ${isAdmin() && pendingCount>0 ? `<button onclick="verifySemuaGugus('${escapeHtml(g)}')" class="btn-primary text-[11px] !py-1.5 !px-2.5 shrink-0" title="Verifikasi ${pendingCount} peserta yang masih menunggu di gugus ini"><i class="fa-solid fa-check-double"></i> Verifikasi Semua (${pendingCount})</button>` : ''}
         <button onclick="toggleGugus('${escapeHtml(g)}')" class="shrink-0 px-1"><i class="fa-solid fa-chevron-${open?'up':'down'} text-xs text-zinc-400"></i></button>
       </div>
       <div class="${open?'':'hidden'} border-t border-zinc-200/70 dark:border-zinc-700">
+        ${renderCadanganListHTML_(g, groupCadangan)}
         ${groupIds.map(kid=>{
           const regRows=groupRows.filter(p=>p.kelompokId===kid);
           const first=regRows[0];
@@ -1876,6 +1891,110 @@ function renderPesertaTable(){
       </div>
     </section>`;
   }).join('') || `<div class="bg-white/95 dark:bg-zinc-900 rounded-xl2 p-8 text-center text-zinc-400">${emptyState('fa-user-group','Belum ada peserta','Peserta akan muncul di sini setelah mendaftar lewat halaman publik.')}</div>`;
+}
+/* ---------- Peserta Cadangan (per Gugus) ----------
+   Admin bisa menambahkan pemain cadangan untuk tiap Gugus (Nama, Asal
+   Sekolah, Upload Foto) TANPA lewat alur pendaftaran publik. Data cadangan
+   disimpan terpisah di DB.cadangan (bukan digabung ke DB.peserta) supaya
+   TIDAK ikut mempengaruhi jumlah peserta terdaftar, jumlah kategori per
+   tim, generate Team/Bagan, ataupun laporan/rekap yang sudah ada -- murni
+   sebagai "pool" cadangan yang bisa dipakai admin untuk menggantikan nama
+   pemain berhalangan lewat kolom "Robah Pemain" (lihat robahPemainSelect). */
+function renderCadanganListHTML_(gugus, list){
+  return `<div class="p-3 md:p-4 bg-zinc-50/60 dark:bg-zinc-800/30 border-b border-zinc-200/70 dark:border-zinc-700">
+    <div class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-300 uppercase tracking-wide mb-2"><i class="fa-solid fa-user-group text-zinc-400 mr-1"></i> Peserta Cadangan (${list.length})</div>
+    ${list.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      ${list.map(c=>`<div class="flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-2">
+        <button onclick="viewCadanganFotoById('${c.id}')" class="shrink-0" title="${c.foto?'Lihat foto':'Belum ada foto'}">
+          ${c.foto?`<img src="${c.foto}" class="w-8 h-8 rounded-full object-cover border border-zinc-200 dark:border-zinc-700">`:`<div class="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center text-zinc-400"><i class="fa-solid fa-user text-[10px]"></i></div>`}
+        </button>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-medium truncate">${escapeHtml(c.nama)}</div>
+          <div class="text-[10px] text-zinc-400 truncate">${escapeHtml(c.asalSekolah)}</div>
+        </div>
+        ${isAdmin()?`<button onclick="hapusCadangan('${c.id}')" class="icon-btn text-red-500 shrink-0" title="Hapus peserta cadangan"><i class="fa-solid fa-trash-can"></i></button>`:''}
+      </div>`).join('')}
+    </div>` : `<div class="text-[11px] text-zinc-400">Belum ada peserta cadangan untuk gugus ini.${isAdmin()?' Klik tombol \u201CCadangan\u201D di atas untuk menambahkan.':''}</div>`}
+  </div>`;
+}
+function openTambahCadanganModal(gugus){
+  if(!isAdmin()) return;
+  window._cdFoto = '';
+  openModal(`<div class="p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-display font-bold text-lg"><i class="fa-solid fa-user-plus text-primary mr-1.5"></i> Tambah Peserta Cadangan</h3>
+      <button onclick="closeModal()" class="text-zinc-400"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="text-[11px] text-zinc-400 mb-4">Gugus: <b class="text-zinc-600 dark:text-zinc-300">${escapeHtml(gugus)}</b>. Peserta cadangan dapat dipakai untuk menggantikan pemain yang berhalangan lewat kolom "Robah Pemain" pada daftar peserta gugus ini.</div>
+    <form onsubmit="return saveCadanganPeserta(event,'${escapeHtml(gugus).replace(/'/g,"\\'")}')" class="space-y-3 text-sm">
+      <div><label class="lbl">Nama Lengkap <span class="text-red-500">*</span></label><input id="cd_nama" class="inp" required></div>
+      <div><label class="lbl">Asal Sekolah <span class="text-red-500">*</span></label><input id="cd_sekolah" class="inp" required></div>
+      <div>
+        <label class="lbl">Upload Foto (opsional)</label>
+        <input type="file" accept="image/*" class="hidden" id="cd_fotoInput" onchange="previewCadanganFoto(this)">
+        <div onclick="document.getElementById('cd_fotoInput').click()" class="border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl p-3 text-center text-xs text-zinc-400 cursor-pointer flex items-center gap-3 justify-center">
+          <img id="cd_fotoPreview" class="hidden w-10 h-10 rounded-full object-cover" src="">
+          <span id="cd_fotoLabel"><i class="fa-solid fa-camera mb-1 block text-lg"></i> Klik untuk unggah foto</span>
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2"><button type="button" onclick="closeModal()" class="btn-ghost">Batal</button><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i> Simpan Cadangan</button></div>
+    </form>
+  </div>`);
+}
+function previewCadanganFoto(input){
+  const file = input.files[0]; if(!file) return;
+  resizeImageFile(file, 500, 0.85, 'image/jpeg').then(url=>{
+    window._cdFoto = url;
+    const img = document.getElementById('cd_fotoPreview'); if(img){ img.src=url; img.classList.remove('hidden'); }
+    const lbl = document.getElementById('cd_fotoLabel'); if(lbl) lbl.textContent = file.name;
+  });
+}
+function saveCadanganPeserta(e, gugus){
+  e.preventDefault();
+  if(!isAdmin()) return false;
+  const nama = document.getElementById('cd_nama').value.trim();
+  const asalSekolah = document.getElementById('cd_sekolah').value.trim();
+  if(!nama || !asalSekolah){
+    Swal.fire({icon:'warning', title:'Data belum lengkap', text:'Lengkapi Nama Lengkap dan Asal Sekolah peserta cadangan.', confirmButtonColor:'#2563EB'});
+    return false;
+  }
+  if(!Array.isArray(DB.cadangan)) DB.cadangan=[];
+  DB.cadangan.push({ id:uid('cad'), nama, asalSekolah, foto: window._cdFoto||'', gugus, waktuDaftar: new Date().toISOString() });
+  addLog('Peserta Cadangan', `Menambahkan peserta cadangan ${nama} (Gugus ${gugus})`);
+  saveDB();
+  closeModal();
+  window._cdFoto='';
+  renderPesertaTable();
+  Swal.fire({toast:true, position:'top-end', icon:'success', title:'Peserta cadangan ditambahkan', showConfirmButton:false, timer:1600});
+  return false;
+}
+function hapusCadangan(id){
+  if(!isAdmin()) return;
+  const c = (DB.cadangan||[]).find(x=>x.id===id); if(!c) return;
+  Swal.fire({icon:'warning', title:'Hapus peserta cadangan?', text:`${c.nama} akan dihapus dari daftar cadangan gugus ${c.gugus||''}.`, showCancelButton:true, confirmButtonColor:'#E1122F', confirmButtonText:'Ya, hapus'}).then(r=>{
+    if(!r.isConfirmed) return;
+    DB.cadangan = DB.cadangan.filter(x=>x.id!==id);
+    addLog('Peserta Cadangan', `Menghapus peserta cadangan ${c.nama}`);
+    saveDB();
+    renderPesertaTable();
+  });
+}
+function viewCadanganFotoById(id){
+  const c = (DB.cadangan||[]).find(x=>x.id===id); if(!c) return;
+  if(!c.foto){
+    Swal.fire({toast:true, position:'top-end', icon:'info', title:'Peserta cadangan ini belum memiliki foto', showConfirmButton:false, timer:1800});
+    return;
+  }
+  openModal(`<div class="p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div>
+        <h3 class="font-display font-bold text-sm">${escapeHtml(c.nama)}</h3>
+        <div class="text-[11px] text-zinc-400">${escapeHtml(c.asalSekolah||'')}</div>
+      </div>
+      <button onclick="closeModal()" class="text-zinc-400"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <img src="${c.foto}" class="w-full max-h-[70vh] object-contain rounded-xl mx-auto bg-zinc-100 dark:bg-zinc-800">
+  </div>`);
 }
 /* Fitur "mata" -- klik nama atau foto pemain di Daftar Peserta untuk melihat
    foto peserta ukuran penuh dalam modal. Diambil dari DB.peserta lewat id
@@ -2049,27 +2168,39 @@ function importPesertaExcel(input){
    sekolah baris tujuan otomatis berubah mengikuti pemain yang dipilih, dan pemain yang sudah
    dipakai akan hilang dari pilihan baris lain (pool otomatis berkurang: 8 -> 7 -> 6 -> ...). */
 function robahPemainSelect(p, regRows){
-  regRows.forEach(r=>{ if(r.namaAsli===undefined){ r.namaAsli=r.nama; r.sekolahAsli=r.asalSekolah; } });
+  regRows.forEach(r=>{ if(r.namaAsli===undefined){ r.namaAsli=r.nama; r.sekolahAsli=r.asalSekolah; r.fotoAsli=r.foto; } });
   const usedIds = new Set(regRows.map(r=>r.robahSourceId).filter(Boolean));
   const sisa = regRows.length - usedIds.size;
   const options = regRows.filter(cand=>cand.id!==p.id && (!usedIds.has(cand.id) || cand.id===p.robahSourceId));
+  /* Pool CADANGAN gugus ini (lihat renderCadanganListHTML_/DB.cadangan) juga
+     ditawarkan sebagai pilihan pengganti -- dipakai ketika pemain yang
+     terdaftar berhalangan dan admin ingin menggantinya dengan pemain
+     cadangan (bukan menukar antar kategori dalam pendaftaran yang sama). */
+  const cadOptions = (DB.cadangan||[]).filter(c=>(c.gugus||'')===(p.gugus||'') && (!usedIds.has(c.id) || c.id===p.robahSourceId));
   return `<select onchange="robahPemain('${p.id}', this.value)" class="inp text-xs py-1.5 w-full min-w-[170px]">
       <option value="">\u2014 Nama asli: ${escapeHtml(p.namaAsli)} \u2014</option>
-      ${options.map(cand=>`<option value="${cand.id}" ${p.robahSourceId===cand.id?'selected':''}>${escapeHtml(cand.namaAsli)} (${escapeHtml(kategoriNama(cand.kategoriId))})</option>`).join('')}
+      ${options.length?`<optgroup label="Tukar Pemain Terdaftar">${options.map(cand=>`<option value="${cand.id}" ${p.robahSourceId===cand.id?'selected':''}>${escapeHtml(cand.namaAsli)} (${escapeHtml(kategoriNama(cand.kategoriId))})</option>`).join('')}</optgroup>`:''}
+      ${cadOptions.length?`<optgroup label="Peserta Cadangan">${cadOptions.map(c=>`<option value="${c.id}" ${p.robahSourceId===c.id?'selected':''}>${escapeHtml(c.nama)} (Cadangan)</option>`).join('')}</optgroup>`:''}
     </select>
-    <div class="text-[10px] text-zinc-400 mt-0.5">Sisa ${sisa} dari ${regRows.length} pemain tersedia</div>`;
+    <div class="text-[10px] text-zinc-400 mt-0.5">Sisa ${sisa} dari ${regRows.length} pemain terdaftar${cadOptions.length?` \u00B7 ${cadOptions.length} cadangan tersedia`:''}</div>`;
 }
 function robahPemain(rowId, candId){
   const p = DB.peserta.find(x=>x.id===rowId); if(!p) return;
   const rows = DB.peserta.filter(x=>x.kelompokId===p.kelompokId);
-  rows.forEach(r=>{ if(r.namaAsli===undefined){ r.namaAsli=r.nama; r.sekolahAsli=r.asalSekolah; } });
+  rows.forEach(r=>{ if(r.namaAsli===undefined){ r.namaAsli=r.nama; r.sekolahAsli=r.asalSekolah; r.fotoAsli=r.foto; } });
   if(!candId){
-    p.nama = p.namaAsli; p.asalSekolah = p.sekolahAsli; delete p.robahSourceId;
+    p.nama = p.namaAsli; p.asalSekolah = p.sekolahAsli; p.foto = p.fotoAsli!==undefined?p.fotoAsli:p.foto; delete p.robahSourceId;
     addLog('Pendaftaran', `Mengembalikan pemain kategori ${kategoriNama(p.kategoriId)} ke nama asli (${p.nama})`);
   } else {
-    const cand = rows.find(x=>x.id===candId); if(!cand) return;
-    p.nama = cand.namaAsli; p.asalSekolah = cand.sekolahAsli; p.robahSourceId = candId;
-    addLog('Pendaftaran', `Mengubah pemain kategori ${kategoriNama(p.kategoriId)} menjadi ${p.nama}`);
+    const cand = rows.find(x=>x.id===candId);
+    if(cand){
+      p.nama = cand.namaAsli; p.asalSekolah = cand.sekolahAsli; p.foto = cand.fotoAsli!==undefined?cand.fotoAsli:cand.foto; p.robahSourceId = candId;
+      addLog('Pendaftaran', `Mengubah pemain kategori ${kategoriNama(p.kategoriId)} menjadi ${p.nama}`);
+    } else {
+      const cad = (DB.cadangan||[]).find(x=>x.id===candId); if(!cad) return;
+      p.nama = cad.nama; p.asalSekolah = cad.asalSekolah; p.foto = cad.foto || p.foto; p.robahSourceId = candId;
+      addLog('Pendaftaran', `Mengganti pemain kategori ${kategoriNama(p.kategoriId)} dengan peserta cadangan ${p.nama}`);
+    }
   }
   saveDB();
   syncToGoogleSheet('PESERTA','update',p);
