@@ -1047,14 +1047,13 @@ function renderPublicJadwalRingkas_(){
         // roster kategori diedit admin belakangan. Selama belum selesai, tetap mengikuti
         // data pemain PALING BARU (live) -- termasuk kalau pemain yang sama juga terdaftar
         // di kategori lain (mis. Tunggal Putra sekaligus Ganda Campuran).
-        // PERBAIKAN: sebelumnya kartu ringkas di halaman awal ini SELALU menampilkan nama
-        // pemain apa adanya, tidak peduli admin sudah menonaktifkan tombol "Nama Pemain:
-        // Aktif/Nonaktif" di menu Jadwal admin (lihat toggleTampilanNamaPemainJadwal &
-        // DB.settings.tampilkanNamaPemainJadwal). Akibatnya nama tetap "bocor" ke halaman
-        // awal walau admin sudah menyembunyikannya di tabel Jadwal admin. Sekarang kedua
-        // tempat mengikuti pengaturan yang SAMA -- begitu dinonaktifkan, kartu di halaman
-        // awal ikut menyembunyikan nama pemain (kategori & skor tetap tampil seperti biasa).
-        const namaPemainAktifPublik = DB.settings.tampilkanNamaPemainJadwal !== false;
+        // Kartu ringkas di halaman awal ini mengikuti pengaturan yang SAMA dengan tabel
+        // Jadwal admin (lihat toggleTampilanNamaPemainJadwal & DB.settings.
+        // tampilkanNamaPemainJadwal), DAN otomatis mempertimbangkan status tiap Main:
+        // begitu diaktifkan, nama HANYA muncul untuk Main yang sudah selesai (done) atau
+        // sedang berlangsung (isLiveMain) -- Main yang belum main tetap disembunyikan.
+        // Saat dinonaktifkan admin, semua nama tetap disembunyikan apa pun statusnya.
+        const namaPemainAktifPublik = DB.settings.tampilkanNamaPemainJadwal !== false && (done || isLiveMain);
         const namaA = namaPemainAktifPublik ? pemainMainNama(l, p, 'A') : '';
         const namaB = namaPemainAktifPublik ? pemainMainNama(l, p, 'B') : '';
         const playersHtml = (namaA || namaB) ? `<div class="pjc-kat-players">
@@ -2725,7 +2724,7 @@ function renderPemain(){
 /* ---------- JADWAL ---------- */
 function renderJadwal(){
   document.getElementById('mainContent').innerHTML = `
-    ${pageHeader('JADWAL '+turnamenPlainText().toUpperCase(),'Jadwal pertandingan seluruh ronde', `${isAdmin()?`<button onclick="toggleTampilanNamaPemainJadwal()" id="btnToggleNamaPemain" class="btn-ghost no-print" title="Saat nonaktif, kolom Kategori menampilkan garis titik-titik (belum diisi) sebagai pengganti nama pemain">
+    ${pageHeader('JADWAL '+turnamenPlainText().toUpperCase(),'Jadwal pertandingan seluruh ronde', `${isAdmin()?`<button onclick="toggleTampilanNamaPemainJadwal()" id="btnToggleNamaPemain" class="btn-ghost no-print" title="Saat aktif, nama pemain otomatis muncul HANYA untuk Main yang sudah selesai atau sedang berlangsung -- Main yang belum main tetap disamarkan garis titik-titik. Saat nonaktif, semua nama disembunyikan apa pun statusnya.">
         <i class="fa-solid fa-${DB.settings.tampilkanNamaPemainJadwal!==false?'eye':'eye-slash'}"></i> Nama Pemain: ${DB.settings.tampilkanNamaPemainJadwal!==false?'Aktif':'Nonaktif'}
       </button>`:''}${isAdmin()?`<button onclick="toggleJadwalOtoCard()" id="btnToggleJadwalOto" class="btn-ghost no-print"><i class="fa-solid fa-sliders"></i> Pengaturan Jadwal Pertandingan</button>`:''}<button onclick="printJadwal()" class="btn-ghost no-print"><i class="fa-solid fa-print"></i> Cetak</button>${isAdmin()?`<button onclick="jadwalForm()" class="btn-primary no-print"><i class="fa-solid fa-pen"></i> Atur Jadwal Manual</button>`:''}`)}
     ${isAdmin()?`<div id="jadwalOtoCardWrap" class="hidden">${renderJadwalOtoCardHTML()}</div>`:''}
@@ -2734,12 +2733,14 @@ function renderJadwal(){
   if(isAdmin()){ renderJadwalOtoFields(); }
 }
 /* Aktifkan/Nonaktifkan tampilan nama pemain di kolom "Kategori" pada tabel
-   Jadwal (baik di layar maupun saat dicetak). AKTIF -> tampilkan nama
-   pemain sebenarnya (Nama A vs Nama B). NONAKTIF -> nama pemain disamarkan
-   memakai garis titik-titik (................. vs .................)
-   sehingga jadwal bisa dicetak/dibagikan lebih awal tanpa membocorkan
-   susunan pemain, lalu diisi manual oleh wasit/panitia saat pertandingan
-   berlangsung. Pengaturan ini tersimpan di DB.settings sehingga berlaku
+   Jadwal (baik di layar admin, kartu ringkas halaman awal, maupun saat
+   dicetak/diunduh). AKTIF -> nama pemain muncul OTOMATIS per-Main, HANYA
+   untuk Main yang sudah SELESAI (skornya sudah diisi) atau sedang
+   BERLANGSUNG saat ini -- Main yang belum main sama sekali tetap
+   disamarkan pakai garis titik-titik, supaya susunan pemain tidak bocor
+   duluan ke tim lawan sebelum gilirannya. NONAKTIF -> SEMUA nama pemain
+   disembunyikan (garis titik-titik) apa pun statusnya, sama seperti
+   perilaku lama. Pengaturan ini tersimpan di DB.settings sehingga berlaku
    untuk semua yang membuka jadwal (bukan hanya di perangkat admin). */
 function toggleTampilanNamaPemainJadwal(){
   if(!isAdmin()) return;
@@ -2888,10 +2889,20 @@ function buildJadwalTableHTML(forPrint, publicMode){
       const rowClasses = [isFirst?'jdw-partai-start':'', isLiveMain?'jdw-live-pulse':''].filter(Boolean).join(' ');
       const rowStyle = pColor ? ` style="background:${pColor}1A"` : '';
       const trCls = rowClasses ? ` class="${rowClasses}"` : '';
-      /* Nama pemain di kolom Kategori bisa disamarkan (garis titik-titik)
-         lewat tombol "Nama Pemain: Aktif/Nonaktif" di atas tabel (lihat
-         toggleTampilanNamaPemainJadwal). Default AKTIF (tampil apa adanya). */
-      const namaPemainAktif = DB.settings.tampilkanNamaPemainJadwal !== false;
+      /* Nama pemain di kolom Kategori HANYA otomatis tampil untuk Main yang
+         sudah SELESAI (skornya sudah diisi, lihat mainSudahMain_) atau
+         sedang BERLANGSUNG saat ini (jam mulainya sudah lewat tapi belum
+         selesai) -- Main yang belum main sama sekali tetap disamarkan
+         (garis titik-titik), supaya susunan pemain tidak bocor ke lawan
+         sebelum gilirannya. Dikendalikan lewat tombol "Nama Pemain:
+         Aktif/Nonaktif" di atas tabel (lihat toggleTampilanNamaPemainJadwal)
+         -- saat Nonaktif, SEMUA nama tetap disembunyikan apa pun statusnya
+         (perilaku lama). Dihitung TANPA syarat publicMode (beda dari
+         isLiveMain di atas yang khusus dipakai untuk highlight/animasi)
+         supaya aturan yang sama berlaku baik di tabel admin, tabel publik,
+         maupun hasil cetak/unduhan (semuanya lewat fungsi ini). */
+      const mainSudahAtauLive_ = p ? (mainSudahMain_(l,p) || !!(mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain))) : false;
+      const namaPemainAktif = DB.settings.tampilkanNamaPemainJadwal !== false && mainSudahAtauLive_;
       const DOT_PLACEHOLDER = '<span class="text-zinc-400">.....................</span>';
       const namaA = p ? (namaPemainAktif ? (pemainMainNama(l,p,'A') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const namaB = p ? (namaPemainAktif ? (pemainMainNama(l,p,'B') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
