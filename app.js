@@ -996,6 +996,39 @@ function mainSudahMain_(l, p){
   }
   return (p.sets||[]).some(s=> s[0]>0 || s[1]>0);
 }
+/* Status TAMPILAN nama pemain per-PARTAI (bukan per-Main/kategori) --
+   disimpan di field baru l.statusTampilanPemain, SENGAJA dipisah dari
+   l.status (yang dipakai untuk menghitung skor tim/pemenang/klasemen)
+   supaya admin bebas mengatur kapan nama pemain boleh terlihat tanpa
+   mengubah logika hasil pertandingan. 3 pilihan: "Belum Main" (nama
+   SEMUA kategori dalam Partai itu disamarkan garis titik-titik),
+   "Sedang Berlangsung" & "Sudah Main" (nama SEMUA 5 kategori dalam
+   Partai itu langsung ditampilkan semua sekaligus, tidak menunggu
+   kategori itu sendiri selesai satu per satu). Selama admin belum
+   pernah memilih manual (lewat dropdown di kolom Aksi menu Jadwal --
+   lihat setStatusTampilNamaPemain), nilainya diturunkan otomatis dari
+   l.status yang sudah ada, supaya data turnamen lama tetap konsisten
+   tanpa perlu migrasi data. */
+function statusTampilNamaPemain_(l){
+  return l.statusTampilanPemain || (l.status==='Selesai' ? 'Sudah Main' : (l.status==='Sedang Main' ? 'Sedang Berlangsung' : 'Belum Main'));
+}
+/* Admin memilih status tampilan nama pemain lewat dropdown di kolom Aksi
+   (lihat buildJadwalTableHTML). Begitu skor kategori pada Partai ini
+   sungguhan mulai diisi, status ini OTOMATIS dipaksa "Sudah Main" oleh
+   recalcLagaResult (dipanggil dari simpanSkorLaga) apa pun pilihan
+   manual admin sebelumnya -- admin tidak perlu mengubahnya lagi manual
+   begitu skor sudah tersimpan. */
+function setStatusTampilNamaPemain(id, val){
+  if(!isAdmin()) return;
+  const l = DB.laga.find(x=>x.id===id); if(!l) return;
+  l.statusTampilanPemain = val;
+  const pk = partaiKe(l);
+  addLog('Jadwal', `Status tampilan nama pemain ${l.ronde}${pk?' Partai ke '+pk:''} diubah ke "${val}"`);
+  saveDB();
+  syncToGoogleSheet('JADWAL','update', l);
+  renderJadwalTable();
+  renderPublicJadwalRingkas_();
+}
 /* ---------- Jadwal Pertandingan RINGKAS (tampilan publik di layar HP/desktop) ----------
    SENGAJA dibuat berbeda & jauh lebih sederhana dari tabel Jadwal admin
    (buildJadwalTableHTML): tabel admin punya banyak kolom sempit (Ronde,
@@ -1034,6 +1067,12 @@ function renderPublicJadwalRingkas_(){
       const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
       const live = isPartaiLiveNow_(l);
       const selesai = l.status === 'Selesai';
+      /* Sama seperti di tabel Jadwal admin (lihat buildJadwalTableHTML):
+         nama pemain dihitung per-PARTAI, bukan per-Main -- begitu Partai
+         ini "Sedang Berlangsung" atau "Sudah Main" (statusTampilNamaPemain_,
+         diatur admin lewat dropdown di kolom Aksi menu Jadwal), nama SEMUA
+         5 kategori langsung ditampilkan sekaligus di kartu ini juga. */
+      const partaiRevealNama = statusTampilNamaPemain_(l) !== 'Belum Main';
       const colorA = teamColor(l.teamA), colorB = teamColor(l.teamB);
       const katChips = items.map((p,idx)=>{
         if(!p) return '';
@@ -1049,11 +1088,12 @@ function renderPublicJadwalRingkas_(){
         // di kategori lain (mis. Tunggal Putra sekaligus Ganda Campuran).
         // Kartu ringkas di halaman awal ini mengikuti pengaturan yang SAMA dengan tabel
         // Jadwal admin (lihat toggleTampilanNamaPemainJadwal & DB.settings.
-        // tampilkanNamaPemainJadwal), DAN otomatis mempertimbangkan status tiap Main:
-        // begitu diaktifkan, nama HANYA muncul untuk Main yang sudah selesai (done) atau
-        // sedang berlangsung (isLiveMain) -- Main yang belum main tetap disembunyikan.
-        // Saat dinonaktifkan admin, semua nama tetap disembunyikan apa pun statusnya.
-        const namaPemainAktifPublik = DB.settings.tampilkanNamaPemainJadwal !== false && (done || isLiveMain);
+        // tampilkanNamaPemainJadwal), DAN ikut status PARTAI (partaiRevealNama, dihitung
+        // sekali per Partai di atas): begitu Partai "Sedang Berlangsung" atau "Sudah Main",
+        // nama SEMUA 5 kategori tampil sekaligus -- selama masih "Belum Main", nama SEMUA
+        // kategori tetap disembunyikan. Saat dinonaktifkan admin, semua nama tetap
+        // disembunyikan apa pun status Partainya.
+        const namaPemainAktifPublik = DB.settings.tampilkanNamaPemainJadwal !== false && partaiRevealNama;
         const namaA = namaPemainAktifPublik ? pemainMainNama(l, p, 'A') : '';
         const namaB = namaPemainAktifPublik ? pemainMainNama(l, p, 'B') : '';
         const playersHtml = (namaA || namaB) ? `<div class="pjc-kat-players">
@@ -2724,7 +2764,7 @@ function renderPemain(){
 /* ---------- JADWAL ---------- */
 function renderJadwal(){
   document.getElementById('mainContent').innerHTML = `
-    ${pageHeader('JADWAL '+turnamenPlainText().toUpperCase(),'Jadwal pertandingan seluruh ronde', `${isAdmin()?`<button onclick="toggleTampilanNamaPemainJadwal()" id="btnToggleNamaPemain" class="btn-ghost no-print" title="Saat aktif, nama pemain otomatis muncul HANYA untuk Main yang sudah selesai atau sedang berlangsung -- Main yang belum main tetap disamarkan garis titik-titik. Saat nonaktif, semua nama disembunyikan apa pun statusnya.">
+    ${pageHeader('JADWAL '+turnamenPlainText().toUpperCase(),'Jadwal pertandingan seluruh ronde', `${isAdmin()?`<button onclick="toggleTampilanNamaPemainJadwal()" id="btnToggleNamaPemain" class="btn-ghost no-print" title="Saat aktif, begitu status Partai (lihat dropdown di kolom Aksi) diatur 'Sedang Berlangsung'/'Sudah Main', nama semua 5 kategori Partai itu otomatis tampil sekaligus -- Partai 'Belum Main' tetap disamarkan garis titik-titik. Saat nonaktif, semua nama disembunyikan apa pun statusnya.">
         <i class="fa-solid fa-${DB.settings.tampilkanNamaPemainJadwal!==false?'eye':'eye-slash'}"></i> Nama Pemain: ${DB.settings.tampilkanNamaPemainJadwal!==false?'Aktif':'Nonaktif'}
       </button>`:''}${isAdmin()?`<button onclick="toggleJadwalOtoCard()" id="btnToggleJadwalOto" class="btn-ghost no-print"><i class="fa-solid fa-sliders"></i> Pengaturan Jadwal Pertandingan</button>`:''}<button onclick="printJadwal()" class="btn-ghost no-print"><i class="fa-solid fa-print"></i> Cetak</button>${isAdmin()?`<button onclick="jadwalForm()" class="btn-primary no-print"><i class="fa-solid fa-pen"></i> Atur Jadwal Manual</button>`:''}`)}
     ${isAdmin()?`<div id="jadwalOtoCardWrap" class="hidden">${renderJadwalOtoCardHTML()}</div>`:''}
@@ -2734,14 +2774,16 @@ function renderJadwal(){
 }
 /* Aktifkan/Nonaktifkan tampilan nama pemain di kolom "Kategori" pada tabel
    Jadwal (baik di layar admin, kartu ringkas halaman awal, maupun saat
-   dicetak/diunduh). AKTIF -> nama pemain muncul OTOMATIS per-Main, HANYA
-   untuk Main yang sudah SELESAI (skornya sudah diisi) atau sedang
-   BERLANGSUNG saat ini -- Main yang belum main sama sekali tetap
-   disamarkan pakai garis titik-titik, supaya susunan pemain tidak bocor
-   duluan ke tim lawan sebelum gilirannya. NONAKTIF -> SEMUA nama pemain
-   disembunyikan (garis titik-titik) apa pun statusnya, sama seperti
-   perilaku lama. Pengaturan ini tersimpan di DB.settings sehingga berlaku
-   untuk semua yang membuka jadwal (bukan hanya di perangkat admin). */
+   dicetak/diunduh). AKTIF -> nama pemain muncul OTOMATIS per-PARTAI (lihat
+   statusTampilNamaPemain_ & dropdown status di kolom Aksi): begitu Partai
+   berstatus "Sedang Berlangsung" atau "Sudah Main", nama SEMUA 5 kategori
+   dalam Partai itu langsung ditampilkan sekaligus -- selama masih "Belum
+   Main", nama SEMUA kategori tetap disamarkan pakai garis titik-titik,
+   supaya susunan pemain tidak bocor duluan ke tim lawan sebelum gilirannya.
+   NONAKTIF -> SEMUA nama pemain disembunyikan (garis titik-titik) apa pun
+   statusnya, sama seperti perilaku lama. Pengaturan ini tersimpan di
+   DB.settings sehingga berlaku untuk semua yang membuka jadwal (bukan
+   hanya di perangkat admin). */
 function toggleTampilanNamaPemainJadwal(){
   if(!isAdmin()) return;
   DB.settings.tampilkanNamaPemainJadwal = !(DB.settings.tampilkanNamaPemainJadwal!==false);
@@ -2877,6 +2919,13 @@ function buildJadwalTableHTML(forPrint, publicMode){
     const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
     if(publicMode && !partaiColorMap[l.id]){ partaiColorMap[l.id] = UNDIAN_COLORS[colorCounter % UNDIAN_COLORS.length]; colorCounter++; }
     const pColor = publicMode ? partaiColorMap[l.id] : null;
+    /* Nama pemain dihitung per-PARTAI (bukan per-Main): begitu Partai ini
+       berstatus "Sedang Berlangsung" atau "Sudah Main" (lihat
+       statusTampilNamaPemain_ & dropdown status di kolom Aksi), nama SEMUA
+       5 kategori langsung ditampilkan sekaligus -- bukan menunggu kategori
+       itu sendiri selesai satu per satu. Saat "Belum Main", nama SEMUA
+       kategori tetap disamarkan. */
+    const partaiRevealNama = statusTampilNamaPemain_(l) !== 'Belum Main';
     items.forEach((p,idx)=>{
       mainKeCounter++;
       const isFirst = idx===0;
@@ -2889,20 +2938,17 @@ function buildJadwalTableHTML(forPrint, publicMode){
       const rowClasses = [isFirst?'jdw-partai-start':'', isLiveMain?'jdw-live-pulse':''].filter(Boolean).join(' ');
       const rowStyle = pColor ? ` style="background:${pColor}1A"` : '';
       const trCls = rowClasses ? ` class="${rowClasses}"` : '';
-      /* Nama pemain di kolom Kategori HANYA otomatis tampil untuk Main yang
-         sudah SELESAI (skornya sudah diisi, lihat mainSudahMain_) atau
-         sedang BERLANGSUNG saat ini (jam mulainya sudah lewat tapi belum
-         selesai) -- Main yang belum main sama sekali tetap disamarkan
-         (garis titik-titik), supaya susunan pemain tidak bocor ke lawan
-         sebelum gilirannya. Dikendalikan lewat tombol "Nama Pemain:
-         Aktif/Nonaktif" di atas tabel (lihat toggleTampilanNamaPemainJadwal)
-         -- saat Nonaktif, SEMUA nama tetap disembunyikan apa pun statusnya
-         (perilaku lama). Dihitung TANPA syarat publicMode (beda dari
-         isLiveMain di atas yang khusus dipakai untuk highlight/animasi)
-         supaya aturan yang sama berlaku baik di tabel admin, tabel publik,
-         maupun hasil cetak/unduhan (semuanya lewat fungsi ini). */
-      const mainSudahAtauLive_ = p ? (mainSudahMain_(l,p) || !!(mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain))) : false;
-      const namaPemainAktif = DB.settings.tampilkanNamaPemainJadwal !== false && mainSudahAtauLive_;
+      /* Nama pemain di kolom Kategori ikut status PARTAI (partaiRevealNama,
+         dihitung sekali per Partai di atas) -- begitu Partai "Sedang
+         Berlangsung" atau "Sudah Main", nama SEMUA 5 kategori tampil
+         sekaligus; selama masih "Belum Main", nama SEMUA kategori tetap
+         disamarkan (garis titik-titik). Dikendalikan lewat tombol "Nama
+         Pemain: Aktif/Nonaktif" di atas tabel (lihat
+         toggleTampilanNamaPemainJadwal) -- saat Nonaktif, SEMUA nama tetap
+         disembunyikan apa pun status Partainya (perilaku lama). Berlaku
+         sama di tabel admin, tabel publik, maupun hasil cetak/unduhan
+         (semuanya lewat fungsi ini). */
+      const namaPemainAktif = DB.settings.tampilkanNamaPemainJadwal !== false && partaiRevealNama;
       const DOT_PLACEHOLDER = '<span class="text-zinc-400">.....................</span>';
       const namaA = p ? (namaPemainAktif ? (pemainMainNama(l,p,'A') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
       const namaB = p ? (namaPemainAktif ? (pemainMainNama(l,p,'B') || '<span class="text-zinc-300">Belum diisi</span>') : DOT_PLACEHOLDER) : '';
@@ -2930,7 +2976,16 @@ function buildJadwalTableHTML(forPrint, publicMode){
       const tglNama = l.tanggal ? fmtDateFull(l.tanggal).split(', ')[1] : '-';
       const tglCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}"${rowStyle}>${l.tanggal?`<div class="font-semibold">${hariNama}</div><div class="text-zinc-500 dark:text-zinc-400 mt-0.5">${tglNama}</div>`:'-'}</td>` : '';
       const pertandinganCell = isFirst ? `<td class="${td} jdw-rowspan text-center" rowspan="${n}"${rowStyle} style="font-size:14px;font-weight:800">${escapeHtml(teamNama(l.teamA))} <span class="text-zinc-400 font-normal" style="font-size:11px;font-weight:600">vs</span> ${escapeHtml(teamNama(l.teamB))}</td>` : '';
-      const aksiCell = showAksi ? (isFirst ? `<td class="${td} jdw-rowspan text-right no-print" rowspan="${n}"><button onclick="jadwalForm('${l.id}')" class="icon-btn text-primary"><i class="fa-solid fa-pen"></i></button></td>` : '') : '';
+      /* Dropdown status tampilan nama pemain per-Partai (lihat
+         statusTampilNamaPemain_ & setStatusTampilNamaPemain) -- admin
+         memilih salah satu dari 3 status; begitu skor mulai diisi, status
+         ini otomatis dipaksa "Sudah Main" oleh recalcLagaResult, tapi
+         admin tetap bisa mengubahnya manual kapan saja lewat dropdown ini
+         (mis. menandai "Sedang Berlangsung" sebelum skor sempat diisi). */
+      const statusPilihan = ['Belum Main','Sedang Berlangsung','Sudah Main'];
+      const statusSaatIni = statusTampilNamaPemain_(l);
+      const statusSelectHtml = `<select onchange="setStatusTampilNamaPemain('${l.id}', this.value)" class="w-full text-[9px] leading-tight border border-zinc-200 dark:border-zinc-700 rounded-md px-1 py-1 bg-white dark:bg-zinc-800 dark:text-zinc-100" title="Status tampilan nama pemain: 'Sedang Berlangsung' &amp; 'Sudah Main' menampilkan nama semua 5 kategori Partai ini; 'Belum Main' menyamarkannya">${statusPilihan.map(s=>`<option value="${escapeHtml(s)}" ${s===statusSaatIni?'selected':''}>${escapeHtml(s)}</option>`).join('')}</select>`;
+      const aksiCell = showAksi ? (isFirst ? `<td class="${td} jdw-rowspan text-right no-print" rowspan="${n}"><div class="flex flex-col items-stretch gap-1">${statusSelectHtml}<button onclick="jadwalForm('${l.id}')" class="icon-btn text-primary self-end"><i class="fa-solid fa-pen"></i></button></div></td>` : '') : '';
       bodyRows.push(`<tr${trCls}${rowStyle}>
         ${rondeCell}
         ${tglCell}
@@ -2953,8 +3008,11 @@ function buildJadwalTableHTML(forPrint, publicMode){
      lihat penjelasan di atas), total lebar 7 kolom yang tersisa WAJIB
      tetap 100% \u2014 bukan 94% seperti sebelumnya \u2014 supaya tidak ada celah
      kosong di sisi kanan kolom Skor saat dicetak. */
+  /* Kolom Aksi diperlebar dari 6% jadi 13% supaya dropdown status tampilan
+     nama pemain (statusPilihan) muat tanpa terpotong -- selisihnya diambil
+     dari kolom Pertandingan (29->26) & Kategori (22->19). */
   const W = showAksi
-    ? { ronde:10, tanggal:9, jam:8, mainke:7, pertandingan:29, kategori:22, skor:9, aksi:6 }
+    ? { ronde:10, tanggal:9, jam:8, mainke:7, pertandingan:26, kategori:19, skor:8, aksi:13 }
     : { ronde:10, tanggal:9, jam:8, mainke:7, pertandingan:33, kategori:24, skor:9 };
   return `
     <thead class="bg-primary-light dark:bg-primary/10 text-xs text-primary"><tr>
@@ -3869,6 +3927,13 @@ function recalcLagaResult(l){
   l.skorTeamB = l.partai.filter(x=>x.winner==='B').length;
   const totalMain = l.partai.filter(x=>x.winner).length;
   l.status = totalMain===0 ? 'Belum Main' : (l.skorTeamA>=3||l.skorTeamB>=3||totalMain===l.partai.length ? 'Selesai' : 'Sedang Main');
+  /* Begitu ADA kategori (Main) pada Partai ini yang skornya sudah mulai
+     diisi -- sekalipun belum ada kategori yang tuntas/menang -- status
+     TAMPILAN nama pemain (lihat statusTampilNamaPemain_) otomatis dipaksa
+     "Sudah Main", terlepas dari pilihan manual admin sebelumnya di dropdown
+     kolom Aksi. Sesuai permintaan: begitu skor diisi, nama 5 kategori pada
+     Partai itu otomatis langsung ditampilkan semua. */
+  if(l.partai.some(x=>mainSudahMain_(l,x))) l.statusTampilanPemain = 'Sudah Main';
   if(l.status==='Selesai' && !l.pemenangTeam){
     l.pemenangTeam = l.skorTeamA>l.skorTeamB ? l.teamA : (l.skorTeamB>l.skorTeamA ? l.teamB : null);
     if(l.pemenangTeam){
