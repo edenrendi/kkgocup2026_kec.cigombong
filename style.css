@@ -1177,6 +1177,38 @@ span.badmintime-title *,
 #publicJadwalLiveDot { display: inline-flex; }
 #publicJadwalLiveDot.hidden { display: none; }
 
+/* Baris kategori (Main) yang sudah "Sudah Main" (ada pemenang) -- highlight
+   hijau transparan lembut, supaya sekilas mata langsung bisa membedakan
+   kategori mana yang sudah tuntas vs yang masih berjalan (merah) atau
+   belum main (putih/normal), konsisten dengan warna hijau yang sudah
+   dipakai di kartu ringkas publik (.pjc-kat-done). */
+.jdw-done-row {
+  background: rgba(22, 163, 74, 0.08);
+}
+.dark .jdw-done-row {
+  background: rgba(22, 163, 74, 0.14);
+}
+
+/* Dropdown kecil "Status LIVE" per-KATEGORI di kolom Kategori tabel Jadwal
+   (admin) -- lihat setMainStatusManual di app.js. Dibuat sekompak mungkin
+   supaya tidak memperlebar kolom Kategori yang sudah ramping. */
+.jdw-mainstatus-select {
+  font-size: 9px;
+  line-height: 1.1;
+  padding: 1px 3px;
+  border-radius: 5px;
+  border: 1px solid #E4E4E7;
+  background: #fff;
+  color: #71717A;
+  max-width: 84px;
+  flex: none;
+}
+.dark .jdw-mainstatus-select {
+  background: #18181B;
+  border-color: #3F3F46;
+  color: #A1A1AA;
+}
+
 /* ===================== ADMIN LAYOUT: Sidebar & Header FIXED/STICKY =====================
    Sebelumnya sidebar memakai "md:static" -- artinya begitu layar >=768px, posisinya
    kembali ke normal document flow. Karena tingginya dipatok h-screen (100vh) sementara
