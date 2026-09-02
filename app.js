@@ -2978,6 +2978,90 @@ function mainSkorDetailText_(l, p){
 function renderJadwalTable(){
   document.getElementById('jdwTable').innerHTML = buildJadwalTableHTML();
 }
+/* ---------- Input Skor LANGSUNG dari kolom Skor menu Jadwal ----------
+   Sebelumnya admin HANYA bisa mengisi skor lewat menu Skor (scorePartaiFormHTML)
+   atau lewat panel skor di Bagan (drawBagan, mode 'bagan') -- keduanya
+   memanggil updateSetScore/updateScore42 yang bergantung pada
+   window._currentLagaId (laga yang sedang dibuka di panel/modal skor).
+   Di kolom Skor tabel Jadwal, TIDAK ada window._currentLagaId yang aktif
+   (banyak Partai ditampilkan sekaligus dalam satu tabel), jadi dibuatkan
+   dua fungsi kembar yang menerima lagaId secara eksplisit dari parameter,
+   bukan dari window._currentLagaId. Selebihnya logikanya PERSIS SAMA:
+   menghitung pemenang Main, mengunci nama pemain, recalcLagaResult (yang
+   otomatis mendorong hasil ke Bagan lewat advanceBagan), lalu menyimpan &
+   menyegarkan SEMUA layar lain yang menampilkan data yang sama (Skor,
+   Bagan, Hasil & Klasemen, Dashboard, kartu ringkas publik) -- supaya
+   admin BEBAS memilih mau input skor dari Jadwal, Skor, ATAU Bagan, hasilnya
+   selalu otomatis konsisten di mana pun dilihat, karena semuanya membaca
+   objek DB.laga yang SAMA persis, bukan salinan terpisah. */
+function updateJadwalSetScore(lagaId, partaiIdx, setIdx, teamIdx, val){
+  if(!isAdmin()) return;
+  const l = DB.laga.find(x=>x.id===lagaId); if(!l) return;
+  const p = l.partai[partaiIdx]; if(!p) return;
+  if(!p.sets) p.sets = [[0,0],[0,0],[0,0]];
+  p.sets[setIdx][teamIdx] = Math.max(0, parseInt(val,10)||0);
+  let winsA=0, winsB=0;
+  p.sets.forEach(s=>{ if(s[0]>0||s[1]>0){ if(s[0]>s[1]) winsA++; else if(s[1]>s[0]) winsB++; } });
+  p.winner = winsA>=2 ? 'A' : (winsB>=2 ? 'B' : null);
+  lockPemainMain_(l, p);
+  recalcLagaResult(l);
+  saveDB(true); /* prioritas: skor perlu segera terlihat oleh peserta yang sedang memantau LIVE */
+  syncToGoogleSheet('SKOR','update', l);
+  renderJadwalTable();
+  renderPublicJadwalRingkas_();
+  renderSkorIfActive();
+  showSkorTersimpanToast_();
+}
+function updateJadwalScore42(lagaId, partaiIdx, teamIdx, val){
+  if(!isAdmin()) return;
+  const l = DB.laga.find(x=>x.id===lagaId); if(!l) return;
+  const p = l.partai[partaiIdx]; if(!p) return;
+  if(!p.score42) p.score42 = [0,0];
+  p.score42[teamIdx] = Math.max(0, parseInt(val,10)||0);
+  const a=p.score42[0], b=p.score42[1];
+  p.winner = (a>0||b>0) ? (a>b?'A':(b>a?'B':null)) : null;
+  lockPemainMain_(l, p);
+  recalcLagaResult(l);
+  saveDB(true);
+  syncToGoogleSheet('SKOR','update', l);
+  renderJadwalTable();
+  renderPublicJadwalRingkas_();
+  renderSkorIfActive();
+  showSkorTersimpanToast_();
+}
+/* Toast konfirmasi "Skor tersimpan" -- fitur SIMPAN yang diminta supaya
+   admin langsung yakin skor yang baru diketik di kolom Jadwal ini benar-benar
+   sudah tersimpan (ke localStorage seketika, lalu didorong ke cloud lewat
+   jalur prioritas -- lihat saveDB(true)/scheduleCloudPush), tanpa perlu
+   tombol "Simpan" terpisah yang gampang lupa diklik. */
+function showSkorTersimpanToast_(){
+  Swal.fire({toast:true, position:'top-end', icon:'success', title:'Skor tersimpan', showConfirmButton:false, timer:1200});
+}
+/* Markup input skor kompak untuk kolom Skor tabel Jadwal (admin). Mengikuti
+   scoreMode Partai yang sama (SET 1/2/3 atau SCORE 42, lihat sv2RowHTML di
+   menu Skor yang polanya serupa) -- supaya tampilannya konsisten dengan
+   panel Input Skor yang sudah ada, hanya dibuat lebih ringkas supaya muat
+   di dalam sel tabel. */
+function jadwalSkorEditHTML(l, p, partaiIdx, mode, colA, colB){
+  if(mode==='SCORE_42'){
+    const a=(p.score42&&p.score42[0])||0, b=(p.score42&&p.score42[1])||0;
+    return `<div class="jdw-skor-edit no-print">
+      <div class="jdw-skor-row">
+        <input type="number" min="0" max="99" class="jdw-skor-input" style="border-color:${colA}" value="${a||''}" placeholder="0" onchange="updateJadwalScore42('${l.id}',${partaiIdx},0,this.value)" aria-label="Skor Team A">
+        <span class="jdw-skor-sep">-</span>
+        <input type="number" min="0" max="99" class="jdw-skor-input" style="border-color:${colB}" value="${b||''}" placeholder="0" onchange="updateJadwalScore42('${l.id}',${partaiIdx},1,this.value)" aria-label="Skor Team B">
+      </div>
+    </div>`;
+  }
+  if(!p.sets) p.sets = [[0,0],[0,0],[0,0]];
+  const rows = [0,1,2].map(si=>`<div class="jdw-skor-row">
+      <span class="jdw-skor-set-label">S${si+1}</span>
+      <input type="number" min="0" max="99" class="jdw-skor-input" style="border-color:${colA}" value="${p.sets[si][0]||''}" placeholder="-" onchange="updateJadwalSetScore('${l.id}',${partaiIdx},${si},0,this.value)" aria-label="Set ${si+1} Team A">
+      <span class="jdw-skor-sep">-</span>
+      <input type="number" min="0" max="99" class="jdw-skor-input" style="border-color:${colB}" value="${p.sets[si][1]||''}" placeholder="-" onchange="updateJadwalSetScore('${l.id}',${partaiIdx},${si},1,this.value)" aria-label="Set ${si+1} Team B">
+    </div>`).join('');
+  return `<div class="jdw-skor-edit no-print">${rows}</div>`;
+}
 /* Menghasilkan HTML lengkap tabel Jadwal (thead+tbody) sebagai STRING murni,
    dipakai baik untuk tabel di layar (#jdwTable) MAUPUN untuk lembar cetak
    (#jadwalPrintSheet). Dibuat sebagai fungsi generator terpisah \u2014 bukan
@@ -3032,6 +3116,8 @@ function buildJadwalTableHTML(forPrint, publicMode){
     const n = items.length;
     const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
     const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+    const scoreMode = l.scoreMode || 'SET_ALL';
+    const colA = teamColor(l.teamA), colB = teamColor(l.teamB);
     if(publicMode && !partaiColorMap[l.id]){ partaiColorMap[l.id] = UNDIAN_COLORS[colorCounter % UNDIAN_COLORS.length]; colorCounter++; }
     const pColor = publicMode ? partaiColorMap[l.id] : null;
     /* Nama pemain dihitung per-PARTAI (bukan per-Main): begitu Partai ini
@@ -3100,8 +3186,16 @@ function buildJadwalTableHTML(forPrint, publicMode){
         : '<span class="text-zinc-300 text-[11px]">-</span>';
       /* Skor per kategori (Main) \u2014 bukan skor akhir Partai. Tampilkan "-" jika
          kategori tersebut belum diisi skornya sama sekali, dan tampilkan
-         skornya begitu sudah diisi (mendukung mode SET 1/2/3 maupun SCORE 42). */
-      const skorMainCell = `<td class="${td} text-center whitespace-nowrap">${mainSkorText(l,p)}</td>`;
+         skornya begitu sudah diisi (mendukung mode SET 1/2/3 maupun SCORE 42).
+         KHUSUS ADMIN (showAksi, bukan hasil cetak/publik): kolom ini diganti
+         jadi input skor LANGSUNG (lihat jadwalSkorEditHTML) -- admin tidak
+         lagi wajib buka menu Skor atau Bagan untuk mengisi skor, bisa
+         langsung diketik dari sini juga. Hasilnya otomatis dihitung ulang &
+         didorong ke SEMUA tempat lain yang menampilkan data yang sama (menu
+         Skor, Bagan, Hasil & Klasemen, kartu ringkas publik) karena semuanya
+         membaca objek DB.laga yang SAMA persis (lihat updateJadwalSetScore/
+         updateJadwalScore42 & renderSkorIfActive). */
+      const skorMainCell = `<td class="${td} text-center whitespace-nowrap">${(showAksi && p) ? jadwalSkorEditHTML(l, p, idx, scoreMode, colA, colB) : mainSkorText(l,p)}</td>`;
       /* Kolom yang tetap sama untuk 1 Partai hanya dirender pada baris Main
          pertama (idx 0) memakai rowspan, sisanya tidak dirender. Kolom
          Tanggal dipecah 2 baris (nama Hari di atas, tanggal lengkap di
@@ -3148,8 +3242,13 @@ function buildJadwalTableHTML(forPrint, publicMode){
   /* Kolom Aksi diperlebar dari 6% jadi 13% supaya dropdown status tampilan
      nama pemain (statusPilihan) muat tanpa terpotong -- selisihnya diambil
      dari kolom Pertandingan (29->26) & Kategori (22->19). */
+  /* Kolom Skor diperlebar dari 8% jadi 15% khusus saat showAksi (admin,
+     bukan hasil cetak) supaya muat input skor manual langsung (lihat
+     jadwalSkorEditHTML) tanpa terpotong -- selisihnya diambil dari kolom
+     Pertandingan (26->21) & Kategori (19->16). Saat forPrint/publik, lebar
+     kolom Skor tetap seperti semula (9%) karena isinya cuma teks ringkas. */
   const W = showAksi
-    ? { ronde:10, tanggal:9, jam:8, mainke:7, pertandingan:26, kategori:19, skor:8, aksi:13 }
+    ? { ronde:9, tanggal:8, jam:7, mainke:6, pertandingan:21, kategori:16, skor:15, aksi:18 }
     : { ronde:10, tanggal:9, jam:8, mainke:7, pertandingan:33, kategori:24, skor:9 };
   return `
     <thead class="bg-primary-light dark:bg-primary/10 text-xs text-primary"><tr>
@@ -4117,7 +4216,7 @@ function ubahModeScoreV2(mode){
   saveDB();
   refreshScoreUI();
 }
-function renderSkorIfActive(){ if(hasClass_('[data-nav="skor"]','bg-primary',true)) renderSkor(); if(hasClass_('[data-nav="bagan"]','bg-primary',true)) renderBaganPage(); if(hasClass_('[data-nav="dashboard"]','bg-primary',true)) renderDashboard(); }
+function renderSkorIfActive(){ if(hasClass_('[data-nav="skor"]','bg-primary',true)) renderSkor(); if(hasClass_('[data-nav="bagan"]','bg-primary',true)) renderBaganPage(); if(hasClass_('[data-nav="dashboard"]','bg-primary',true)) renderDashboard(); if(hasClass_('[data-nav="hasil"]','bg-primary',true)) renderHasil(); }
 
 /* ---------- HASIL ---------- */
 function renderHasil(){
