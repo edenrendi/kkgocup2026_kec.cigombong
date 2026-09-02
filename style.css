@@ -1209,6 +1209,27 @@ span.badmintime-title *,
   color: #A1A1AA;
 }
 
+/* ---------- Input Skor LANGSUNG di kolom Skor tabel Jadwal (admin) ----------
+   Dipakai oleh jadwalSkorEditHTML di app.js -- admin bisa mengetik skor
+   tiap Set (atau Score 42) langsung di sini tanpa perlu membuka menu Skor
+   atau Bagan terpisah. Dibuat sekompak mungkin (angka kecil, border warna
+   tim) supaya tetap muat rapi di dalam sel tabel yang sempit, konsisten
+   secara visual dengan input skor yang sama di panel Input Skor
+   (.sv2-score-input) hanya diperkecil ukurannya. */
+.jdw-skor-edit{ display:flex; flex-direction:column; gap:2px; align-items:center; }
+.jdw-skor-row{ display:flex; align-items:center; justify-content:center; gap:3px; }
+.jdw-skor-set-label{ font-size:8.5px; font-weight:700; color:#A1A1AA; width:14px; text-align:right; flex:none; }
+.jdw-skor-input{
+  width:26px; height:22px; text-align:center; font-size:11px; font-weight:700;
+  border:1.5px solid #E4E4E7; border-radius:5px; background:#fff; color:#18181B;
+  -moz-appearance:textfield;
+}
+.dark .jdw-skor-input{ background:#18181B; color:#F4F4F5; }
+.jdw-skor-input::-webkit-outer-spin-button, .jdw-skor-input::-webkit-inner-spin-button{ -webkit-appearance:none; margin:0; }
+.jdw-skor-input:focus{ outline:none; box-shadow:0 0 0 2px rgba(37,99,235,.25); }
+.jdw-skor-sep{ font-size:10px; color:#A1A1AA; flex:none; }
+
+
 /* ===================== ADMIN LAYOUT: Sidebar & Header FIXED/STICKY =====================
    Sebelumnya sidebar memakai "md:static" -- artinya begitu layar >=768px, posisinya
    kembali ke normal document flow. Karena tingginya dipatok h-screen (100vh) sementara
