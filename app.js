@@ -195,7 +195,7 @@ function loadDB(){
      Drive supaya semua perangkat yang membuka link ini melihat data yang sama. */
   if(cloudSyncEnabled()) pullDBFromCloud(true);
 }
-function saveDB(){
+function saveDB(priority){
   SAFE_STORAGE.setItem(STORAGE_KEY, JSON.stringify(DB));
   window._settingsDirty=false;
   /* PERBAIKAN: catat kapan terakhir kali ada perubahan LOKAL yang disimpan.
@@ -205,7 +205,13 @@ function saveDB(){
      balik oleh data lama begitu tarikan yang lambat itu akhirnya selesai.
      Lihat penjelasan lengkap di pullDBFromCloud(). */
   window._lastLocalChangeAt = Date.now();
-  scheduleCloudPush();
+  /* PERBAIKAN "jeda antara admin input skor/status LIVE dengan yang dilihat
+     peserta": panggilan saveDB(true) -- dipakai khusus untuk perubahan yang
+     PENTING dilihat peserta SECEPATNYA (skor, status LIVE per kategori,
+     status tampilan nama pemain) -- melewati jeda 600ms normal (dulu dipakai
+     supaya beberapa perubahan beruntun tidak spam kirim satu-satu) dan
+     langsung mendorong ke cloud jauh lebih cepat (lihat scheduleCloudPush). */
+  scheduleCloudPush(priority);
 }
 function addLog(jenis, ket){ DB.logs.unshift(mkLog(jenis, ket)); DB.logs = DB.logs.slice(0,200); saveDB(); }
 
@@ -263,7 +269,7 @@ function updateCloudStatusUI(){
     el.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(label)}${s.lastSyncAt?` \u00B7 ${new Date(s.lastSyncAt).toLocaleTimeString('id-ID')}`:''}</span>`;
   });
 }
-function scheduleCloudPush(){
+function scheduleCloudPush(priority){
   if(!cloudSyncEnabled()) return;
   /* PERBAIKAN BUG UTAMA "data kembali ke awal": aksi 'savedb' di Code.gs
      MENIMPA SELURUH database di server dengan salinan DB yang ada di
@@ -302,11 +308,15 @@ function scheduleCloudPush(){
      tidak tersimpan ke server. */
   if(_cloudPushing){ _cloudPushPending = true; return; }
   clearTimeout(_cloudPushTimer);
-  _cloudPushTimer = setTimeout(pushDBToCloud, 600); /* PERBAIKAN: dulu 1.5 detik -> perubahan
-    admin (skor, jadwal, dll) sengaja ditunda dulu sebelum mulai dikirim ke server, menambah
-    jeda sebelum peserta lain bisa menariknya. Dipersingkat jadi 600ms (masih cukup untuk
-    menggabungkan beberapa perubahan beruntun jadi 1 kali kirim, supaya tidak spam) supaya
-    proses pengiriman ke server dimulai lebih cepat setelah admin berhenti mengetik/klik. */
+  /* PERBAIKAN "peserta lihat skor/LIVE telat": perubahan PRIORITAS (skor,
+     status LIVE per kategori, status tampilan nama pemain -- dipanggil lewat
+     saveDB(true)) hanya ditunda 150ms (sekadar menggabungkan klik/ketukan
+     yang beruntun persis di saat yang sama, mis. mengetik 2 set skor
+     berurutan cepat), BUKAN lagi 600ms penuh, supaya mulai terkirim ke
+     server nyaris seketika. Perubahan biasa (data peserta/tim/pengaturan,
+     dll) tetap memakai jeda 600ms seperti sebelumnya supaya tidak spam
+     kirim tiap ketikan. */
+  _cloudPushTimer = setTimeout(pushDBToCloud, priority ? 150 : 600);
 }
 let _cloudPushPending = false;
 async function pushDBToCloud(){
@@ -506,19 +516,24 @@ async function deletePesertaToCloud_(ids){
    Ditunda kalau: sedang ada modal/formulir terbuka (supaya tidak menimpa
    apa yang sedang diketik admin), atau sedang ada pengiriman data yang
    masih tertunda (supaya perubahan lokal tidak keburu tertimpa data lama). */
-const CLOUD_PULL_INTERVAL_MS = 4000; /* PERBAIKAN: dulu 45 detik, lalu 10 detik -> peserta masih
-  merasakan jeda/delay antara admin meng-input data (skor, jadwal, undian, dll) dengan data itu
-  benar-benar muncul di layar peserta lain yang sudah membuka link, karena peserta harus
-  menunggu sampai giliran tarikan otomatis berikutnya datang (rata-rata setengah dari nilai
-  interval ini, ditambah waktu respons server Apps Script + jeda pengiriman admin di atas).
-  Dipersingkat jadi 4 detik supaya terasa nyaris realtime -- inilah batas paling pendek yang
-  wajar dipakai terus-menerus oleh BANYAK layar peserta sekaligus tanpa membebani/melampaui
-  kuota eksekusi harian Google Apps Script (lihat juga perbaikan rerenderCurrentView() di
-  bawah, supaya hasil tarikan tiap beberapa detik ini benar-benar dipakai memperbarui layar,
-  dan visibilitychange/focus di bawah supaya begitu tab dibuka lagi langsung ditarik seketika,
-  tidak menunggu giliran interval berikutnya). Google Apps Script sendiri tidak mendukung
-  push/websocket, jadi cara "tarik data berkala" (polling) inilah metode tercepat yang mungkin
-  dilakukan tanpa mengganti infrastruktur backend ke layanan realtime khusus (mis. Firebase). */
+/* PERBAIKAN "jeda antara admin input & peserta lihat update": dulu tarikan
+   berkala memakai SATU interval tetap (CLOUD_PULL_INTERVAL_MS, sempat 45
+   detik -> 10 detik -> 4 detik) untuk semua kondisi. Sekarang dipecah jadi
+   2 mode & MENYESUAIKAN DIRI otomatis (lihat scheduleAutoPull_ di bawah)
+   supaya terasa nyaris realtime justru pada saat yang paling dibutuhkan
+   (sedang ada pertandingan berlangsung), tanpa terus-menerus membebani/
+   melampaui kuota eksekusi harian Google Apps Script di luar jam itu.
+   Google Apps Script sendiri tidak mendukung push/websocket, jadi cara
+   "tarik data berkala" (polling) inilah metode tercepat yang mungkin
+   dilakukan tanpa mengganti infrastruktur backend ke layanan realtime
+   khusus (mis. Firebase). */
+const CLOUD_PULL_INTERVAL_LIVE_MS = 2000; /* PERBAIKAN: dipakai KHUSUS selagi ada Partai/kategori
+  yang sedang berlangsung (lihat isPartaiLiveNow_) -- momen inilah peserta paling sering
+  membuka & memelototi layar (mis. menonton skor jalan), jadi tarikan dipercepat jadi 2 detik
+  supaya skor & penanda LIVE ikut berpindah nyaris bersamaan dengan input admin. Di luar jam
+  pertandingan berlangsung, interval kembali ke CLOUD_PULL_INTERVAL_IDLE_MS yang lebih longgar
+  supaya kuota harian Google Apps Script tidak terkuras sia-sia sepanjang hari. */
+const CLOUD_PULL_INTERVAL_IDLE_MS = 6000;
 function isModalOpen_(){
   const el = document.getElementById('modalRoot');
   return !!(el && el.innerHTML.trim() !== '');
@@ -552,7 +567,26 @@ function autoPullIfSafe_(){
   if(window._settingsDirty) return; /* ada isian form (mis. daftar video YouTube) yang belum diklik Simpan -- jangan timpa */
   pullDBFromCloud(true);
 }
-setInterval(autoPullIfSafe_, CLOUD_PULL_INTERVAL_MS);
+/* PERBAIKAN "jeda antara admin input dengan peserta lihat update": dulu
+   tarikan otomatis memakai setInterval TETAP (selalu CLOUD_PULL_INTERVAL_MS,
+   4 detik, tidak peduli sedang ada pertandingan berlangsung atau tidak).
+   Sekarang jadwal tarikan MENYESUAIKAN DIRI setiap kali selesai menarik:
+   begitu terdeteksi ada Partai/kategori yang SEDANG BERLANGSUNG (lihat
+   isPartaiLiveNow_, sekarang juga mengikuti status LIVE manual per kategori
+   -- lihat mainStatusEfektif_), tarikan dipercepat jadi tiap
+   CLOUD_PULL_INTERVAL_LIVE_MS (2 detik) supaya skor & penanda LIVE yang
+   diinput admin nyaris langsung terlihat peserta. Selagi tidak ada
+   pertandingan yang berlangsung, kembali ke jeda yang lebih longgar
+   (CLOUD_PULL_INTERVAL_IDLE_MS) supaya tidak membebani kuota Google Apps
+   Script sepanjang hari tanpa perlu. */
+let _autoPullTimer = null;
+function scheduleAutoPull_(){
+  clearTimeout(_autoPullTimer);
+  const anyLive = !!(DB && DB.laga && DB.laga.some(isPartaiLiveNow_));
+  const interval = anyLive ? CLOUD_PULL_INTERVAL_LIVE_MS : CLOUD_PULL_INTERVAL_IDLE_MS;
+  _autoPullTimer = setTimeout(function(){ autoPullIfSafe_(); scheduleAutoPull_(); }, interval);
+}
+scheduleAutoPull_();
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') autoPullIfSafe_(); });
 window.addEventListener('focus', autoPullIfSafe_);
 
@@ -974,11 +1008,20 @@ function previewJadwal(){
       jalan" dari jadwal, sekalipun admin belum sempat klik input skor.
    Dipakai untuk titik "LIVE" ringkasan di judul panel & highlight kartu. */
 function isPartaiLiveNow_(l){
-  if(l.status==='Sedang Main') return true;
   if(l.status==='Selesai') return false;
+  if(l.status==='Sedang Main') return true;
+  /* PERBAIKAN: sebelumnya titik LIVE ringkasan Partai HANYA mengikuti jam
+     jadwal (di bawah) -- kalau admin menandai satu kategori "Sedang
+     Berlangsung" secara manual (lihat mainStatusEfektif_/setMainStatusManual)
+     sebelum skor sungguhan diisi, atau jam pertandingan sungguhan meleset
+     dari jadwal, titik LIVE tidak ikut menyala. Sekarang Partai dianggap
+     LIVE begitu SALAH SATU kategori di dalamnya berstatus efektif "Sedang
+     Berlangsung", apa pun sumbernya (skor mulai diisi, ditandai manual oleh
+     admin, ATAU jam jadwal sedang berjalan). */
+  const items = (l.partai&&l.partai.length) ? l.partai : [];
+  if(items.some(p=>mainStatusEfektif_(l,p)==='Sedang Berlangsung')) return true;
   if(!l.tanggal || l.tanggal!==todayISO() || !l.jam) return false;
-  const items = (l.partai&&l.partai.length) ? l.partai : [null];
-  const n = items.length;
+  const n = items.length || 1;
   const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
   const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
   const selesai = addMinutesToTime(l.jam, (n-1)*spacing + durasiMain);
@@ -995,6 +1038,63 @@ function mainSudahMain_(l, p){
     return a>0 || b>0;
   }
   return (p.sets||[]).some(s=> s[0]>0 || s[1]>0);
+}
+/* ---------- Status LIVE per-KATEGORI (Main) ----------
+   Sebelumnya penanda "LIVE" per kategori di halaman Jadwal HANYA dihitung
+   dari jam jadwal (waktu sekarang berada di antara jam mulai & selesai
+   kategori itu menurut rencana admin) -- kalau pertandingan sungguhan
+   dimulai lebih cepat/lambat dari jadwal, atau admin ingin menandai kategori
+   tertentu "sedang main" SEBELUM sempat input skor, statusnya tidak akurat.
+   Fungsi ini menggabungkan beberapa sumber, diprioritaskan dari yang paling
+   terpercaya ke yang paling umum:
+     1) Kalau kategori itu SUDAH ADA PEMENANGNYA (p.winner) -> "Sudah Main".
+     2) Kalau skornya SUDAH MULAI diisi tapi belum ada pemenang (skor
+        berjalan di menu Skor) -> "Sedang Berlangsung" (paling akurat,
+        berasal dari input skor sungguhan).
+     3) Kalau admin MENANDAI MANUAL lewat dropdown per-kategori di kolom
+        Kategori menu Jadwal (p.statusManual, lihat setMainStatusManual) ->
+        ikuti pilihan admin itu.
+     4) Kalau tidak ada dari semua itu -> jatuh balik ke jam jadwal otomatis
+        (waktu sekarang ada di antara jam mulai & selesai kategori tsb).
+   Dipakai bersama oleh tabel Jadwal admin & kartu ringkas Jadwal publik
+   supaya KEDUANYA selalu menampilkan status yang identik/konsisten. */
+function mainStatusEfektif_(l, p){
+  if(!p) return 'Belum Main';
+  if(p.winner) return 'Sudah Main';
+  if(mainSudahMain_(l,p)) return 'Sedang Berlangsung';
+  if(p.statusManual==='Sedang Berlangsung' || p.statusManual==='Sudah Main' || p.statusManual==='Belum Main') return p.statusManual;
+  if(l.tanggal===todayISO() && l.jam && l.status!=='Selesai'){
+    const items = (l.partai&&l.partai.length) ? l.partai : [];
+    const idx = items.indexOf(p);
+    if(idx>=0){
+      const spacing = Math.max(1, parseInt(l.durasiKategori,10)||15);
+      const durasiMain = Math.max(1, parseInt(l.durasiMenit,10) || spacing);
+      const mulai = addMinutesToTime(l.jam, idx*spacing);
+      const selesaiMain = addMinutesToTime(mulai, durasiMain);
+      const now = nowTime();
+      if(now>=mulai && now<=selesaiMain) return 'Sedang Berlangsung';
+    }
+  }
+  return 'Belum Main';
+}
+/* Admin menandai status SATU kategori (Main) secara manual lewat dropdown
+   kecil di kolom Kategori menu Jadwal -- terpisah dari dropdown "Nama
+   Pemain" per-Partai yang sudah ada (setStatusTampilNamaPemain). Pilihan
+   "Otomatis" menghapus override manual (statusManual=null) sehingga
+   statusnya kembali mengikuti skor/jam jadwal seperti biasa (lihat
+   mainStatusEfektif_). Perubahan ini didorong SEGERA ke cloud (bukan
+   ditunda 600ms seperti perubahan biasa) supaya peserta yang sedang
+   memantau langsung melihat LIVE menyala tanpa jeda berarti. */
+function setMainStatusManual(lagaId, kategoriId, val){
+  if(!isAdmin()) return;
+  const l = DB.laga.find(x=>x.id===lagaId); if(!l) return;
+  const p = (l.partai||[]).find(x=>x.kategoriId===kategoriId); if(!p) return;
+  p.statusManual = val || null;
+  addLog('Jadwal', `Status LIVE kategori ${kategoriNama(kategoriId)} (${l.ronde}) diubah ke "${val||'Otomatis'}"`);
+  saveDB(true);
+  syncToGoogleSheet('JADWAL','update', l);
+  renderJadwalTable();
+  renderPublicJadwalRingkas_();
 }
 /* Status TAMPILAN nama pemain per-PARTAI (bukan per-Main/kategori) --
    disimpan di field baru l.statusTampilanPemain, SENGAJA dipisah dari
@@ -1024,7 +1124,7 @@ function setStatusTampilNamaPemain(id, val){
   l.statusTampilanPemain = val;
   const pk = partaiKe(l);
   addLog('Jadwal', `Status tampilan nama pemain ${l.ronde}${pk?' Partai ke '+pk:''} diubah ke "${val}"`);
-  saveDB();
+  saveDB(true); /* prioritas: peserta yang memantau perlu segera melihat perubahan ini */
   syncToGoogleSheet('JADWAL','update', l);
   renderJadwalTable();
   renderPublicJadwalRingkas_();
@@ -1077,10 +1177,25 @@ function renderPublicJadwalRingkas_(){
       const katChips = items.map((p,idx)=>{
         if(!p) return '';
         const mulai = l.jam ? addMinutesToTime(l.jam, idx*spacing) : null;
-        const isLiveMain = live && mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain);
-        const done = mainSudahMain_(l,p);
+        /* PERBAIKAN: dulu status LIVE/Selesai kartu ringkas ini dihitung
+           TERPISAH & BERBEDA dari tabel Jadwal admin (isLiveMain lokal di
+           sini hanya dari jam jadwal, "done" hanya dari skor) -- sekarang
+           KEDUANYA memakai mainStatusEfektif_ yang sama persis, supaya
+           tandai LIVE manual yang diklik admin di tabel Jadwal langsung
+           konsisten tampil di kartu publik ini juga, bukan cuma di tabel
+           admin. */
+        const statusEfektifMain = mainStatusEfektif_(l, p);
+        const isLiveMain = statusEfektifMain === 'Sedang Berlangsung';
+        const done = statusEfektifMain === 'Sudah Main';
         const stateCls = isLiveMain ? 'pjc-kat-live' : done ? 'pjc-kat-done' : 'pjc-kat-pending';
-        const scoreHtml = done ? mainSkorText(l,p) : (isLiveMain ? '<i class="fa-solid fa-shuttlecock"></i>' : (mulai||'-'));
+        /* Skor ditampilkan otomatis begitu MULAI diisi (bukan menunggu
+           statusnya "Sudah Main"/ada pemenang) -- supaya selagi kategori ini
+           LIVE & skornya sedang berjalan, peserta tetap melihat angka
+           terkini (mis. "15-12"), bukan cuma ikon kok/shuttle statis. Ikon
+           kok hanya tampil kalau ditandai LIVE tapi skornya belum sempat
+           diisi sama sekali (mis. baru ditandai manual oleh admin). */
+        const skorSudahDiisi = mainSudahMain_(l,p);
+        const scoreHtml = skorSudahDiisi ? mainSkorText(l,p) : (isLiveMain ? '<i class="fa-solid fa-shuttlecock"></i>' : (mulai||'-'));
         // Nama pemain: kalau Main ini sudah selesai (ada pemenang), nama yang tampil sudah
         // TERKUNCI (snapshot saat itu, lihat lockPemainMain_) supaya tidak berubah walau
         // roster kategori diedit admin belakangan. Selama belum selesai, tetap mengikuti
@@ -1102,7 +1217,7 @@ function renderPublicJadwalRingkas_(){
           </div>` : '';
         // Skor rinci per-set (bukan cuma jumlah set menang) supaya "skor pemain" yang
         // tampil di halaman awal lebih informatif -- mis. "21-15 &middot; 18-21 &middot; 21-19".
-        const detailScore = done ? mainSkorDetailText_(l,p) : '';
+        const detailScore = skorSudahDiisi ? mainSkorDetailText_(l,p) : '';
         const detailHtml = detailScore ? `<div class="pjc-kat-detail">${detailScore}</div>` : '';
         return `<div class="pjc-kat-chip ${stateCls}">
           <div class="pjc-kat-top"><span class="pjc-kat-name">${escapeHtml(kategoriNama(p.kategoriId))}</span><span class="pjc-kat-score">${scoreHtml}</span></div>
@@ -2933,9 +3048,16 @@ function buildJadwalTableHTML(forPrint, publicMode){
       const jamCell = mulai ? `${mulai}\u2013${addMinutesToTime(mulai,durasiMain)}` : '-';
       /* Sedang berlangsung SEKARANG = per kategori (Main), bukan per Partai
          \u2014 supaya di antara 5 Main dalam 1 Partai, hanya baris kategori yang
-         jamnya benar-benar sedang berjalan yang menyala merah. */
-      const isLiveMain = publicMode && mulai && l.tanggal===todayISO() && l.status!=='Selesai' && nowTime()>=mulai && nowTime()<=addMinutesToTime(mulai,durasiMain);
-      const rowClasses = [isFirst?'jdw-partai-start':'', isLiveMain?'jdw-live-pulse':''].filter(Boolean).join(' ');
+         benar-benar sedang berjalan yang menyala merah. PERBAIKAN: dulu
+         status ini HANYA muncul di tabel publik (publicMode) dan HANYA
+         dihitung dari jam jadwal -- sekarang dipakai di tabel admin JUGA
+         (supaya admin sendiri melihat penanda LIVE-nya), dan sumbernya
+         digabung lewat mainStatusEfektif_ (skor mulai diisi / ditandai
+         manual oleh admin / jam jadwal), lihat penjelasan di fungsi itu. */
+      const statusEfektifMain = mainStatusEfektif_(l, p);
+      const isLiveMain = statusEfektifMain === 'Sedang Berlangsung';
+      const isDoneMain = statusEfektifMain === 'Sudah Main';
+      const rowClasses = [isFirst?'jdw-partai-start':'', isLiveMain?'jdw-live-pulse':(isDoneMain?'jdw-done-row':'')].filter(Boolean).join(' ');
       const rowStyle = pColor ? ` style="background:${pColor}1A"` : '';
       const trCls = rowClasses ? ` class="${rowClasses}"` : '';
       /* Nama pemain di kolom Kategori ikut status PARTAI (partaiRevealNama,
@@ -2958,8 +3080,23 @@ function buildJadwalTableHTML(forPrint, publicMode){
          bukan lagi digabung rata tengah "namaA vs namaB" -- supaya sekilas
          mata langsung terlihat pemain mana milik team yang mana, konsisten
          dengan urutan Team A vs Team B di kolom Pertandingan sebelahnya. */
+      /* Dropdown kecil "Status LIVE" per-KATEGORI -- terpisah dari dropdown
+         "Nama Pemain" per-Partai yang sudah ada (statusSelectHtml di bawah).
+         HANYA tampil untuk admin & bukan hasil cetak (showAksi), supaya
+         admin bisa menandai satu kategori tertentu "Sedang Berlangsung"
+         (LIVE) atau "Sudah Main" secara manual -- misalnya begitu shuttle
+         mulai dipukul tapi admin belum sempat buka menu Skor, atau jam
+         pertandingan sungguhan meleset dari jadwal. "Otomatis" mengikuti
+         skor/jam jadwal seperti biasa (lihat mainStatusEfektif_). */
+      const mainStatusCtrl = (showAksi && p) ? `<select onchange="setMainStatusManual('${l.id}','${escapeHtml(p.kategoriId)}', this.value)" class="jdw-mainstatus-select no-print" title="Tandai status LIVE kategori ini secara manual. Pilih Otomatis untuk kembali mengikuti skor/jam jadwal.">
+          <option value="" ${!p.statusManual?'selected':''}>Otomatis</option>
+          <option value="Sedang Berlangsung" ${p.statusManual==='Sedang Berlangsung'?'selected':''}>\u25CF Tandai LIVE</option>
+          <option value="Sudah Main" ${p.statusManual==='Sudah Main'?'selected':''}>\u2713 Tandai Selesai</option>
+          <option value="Belum Main" ${p.statusManual==='Belum Main'?'selected':''}>Tandai Belum Main</option>
+        </select>` : '';
+      const statusBadge = isLiveMain ? ' <span class="text-red-600">\u25CF LIVE</span>' : (isDoneMain ? ' <span class="text-emerald-600">\u2713 Selesai</span>' : '');
       const kategoriCell = p
-        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5">${escapeHtml(kategoriNama(p.kategoriId))}${isLiveMain?' <span class=\"text-red-600\">\u25CF LIVE</span>':''}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug flex items-center justify-between gap-1"><span class="text-left flex-1">${namaA}</span><span class="text-zinc-400 font-normal shrink-0">vs</span><span class="text-right flex-1">${namaB}${lockedIcon}</span></div>`
+        ? `<div class="text-[10px] font-bold uppercase tracking-wide text-primary mb-0.5 flex items-center justify-between gap-1"><span>${escapeHtml(kategoriNama(p.kategoriId))}${statusBadge}</span>${mainStatusCtrl}</div><div class="text-[11px] font-medium text-zinc-700 dark:text-zinc-200 leading-snug flex items-center justify-between gap-1"><span class="text-left flex-1">${namaA}</span><span class="text-zinc-400 font-normal shrink-0">vs</span><span class="text-right flex-1">${namaB}${lockedIcon}</span></div>`
         : '<span class="text-zinc-300 text-[11px]">-</span>';
       /* Skor per kategori (Main) \u2014 bukan skor akhir Partai. Tampilkan "-" jika
          kategori tersebut belum diisi skornya sama sekali, dan tampilkan
@@ -3881,7 +4018,7 @@ function simpanSkorLaga(id, mode){
   const l = DB.laga.find(x=>x.id===id);
   if(!l){ Swal.fire({icon:'error', title:'Pertandingan tidak ditemukan', confirmButtonColor:'#E1122F'}); return; }
   recalcLagaResult(l);
-  saveDB();
+  saveDB(true); /* prioritas: skor perlu segera terlihat oleh peserta yang sedang memantau LIVE */
   syncToGoogleSheet('SKOR','update', l);
   Swal.fire({toast:true, position:'top-end', icon:'success', title:'Skor tersimpan', showConfirmButton:false, timer:1600});
   if(mode==='modal'){
@@ -3954,7 +4091,7 @@ function updateSetScore(partaiIdx, setIdx, teamIdx, val){
   p.winner = winsA>=2 ? 'A' : (winsB>=2 ? 'B' : null);
   lockPemainMain_(l, p);
   recalcLagaResult(l);
-  saveDB();
+  saveDB(true); /* prioritas: skor perlu segera terlihat oleh peserta yang sedang memantau LIVE */
   syncToGoogleSheet('SKOR','update', l);
   refreshScoreUI();
 }
@@ -3968,7 +4105,7 @@ function updateScore42(partaiIdx, teamIdx, val){
   p.winner = (a>0||b>0) ? (a>b?'A':(b>a?'B':null)) : null;
   lockPemainMain_(l, p);
   recalcLagaResult(l);
-  saveDB();
+  saveDB(true); /* prioritas: skor perlu segera terlihat oleh peserta yang sedang memantau LIVE */
   syncToGoogleSheet('SKOR','update', l);
   refreshScoreUI();
 }
