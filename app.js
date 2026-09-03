@@ -4170,13 +4170,41 @@ function recalcLagaResult(l){
      kolom Aksi. Sesuai permintaan: begitu skor diisi, nama 5 kategori pada
      Partai itu otomatis langsung ditampilkan semua. */
   if(l.partai.some(x=>mainSudahMain_(l,x))) l.statusTampilanPemain = 'Sudah Main';
-  if(l.status==='Selesai' && !l.pemenangTeam){
-    l.pemenangTeam = l.skorTeamA>l.skorTeamB ? l.teamA : (l.skorTeamB>l.skorTeamA ? l.teamB : null);
+  /* PENTING (bugfix): pemenangTeam HARUS selalu dihitung ULANG dari skor
+     terkini setiap kali fungsi ini jalan -- bukan cuma sekali lalu dikunci
+     selamanya (kode lama pakai guard "&& !l.pemenangTeam" yang membuat
+     pemenang PERTAMA yang tercatat tidak pernah diperbarui lagi walau admin
+     mengoreksi skor sebuah kategori setelahnya). Akibatnya pernah terjadi:
+     skor akhir 3-2 tapi tim yang skornya 2 yang lanjut ke bagan/jadwal,
+     karena pemenangTeam sempat "kepatok" ke hasil hitungan sebelum koreksi.
+     Sekarang pemenangTeam SELALU mengikuti skorTeamA vs skorTeamB yang
+     terbaru, dan setiap kali hasilnya BERUBAH, bagan/jadwal ronde
+     berikutnya ikut disinkronkan ulang (advanceBagan dipanggil lagi). */
+  const pemenangBaru = l.status==='Selesai'
+    ? (l.skorTeamA>l.skorTeamB ? l.teamA : (l.skorTeamB>l.skorTeamA ? l.teamB : null))
+    : null;
+  if(pemenangBaru !== l.pemenangTeam){
+    const pemenangLama = l.pemenangTeam;
+    /* Jika laga di ronde berikutnya (tempat pemenang lama sudah terlanjur
+       maju) TERNYATA sudah mulai diisi skornya juga, beri peringatan keras
+       ke admin -- supaya kesalahan input tidak diam-diam menimpa data yang
+       sudah berjalan di ronde berikutnya. */
+    if(pemenangLama){
+      const order = DB.baganMeta && DB.baganMeta.order; const pos = order ? order.indexOf(l.id) : -1;
+      let nextLaga = null;
+      if(pos>=0 && pos<4){ nextLaga = DB.laga.find(x=>x.id===order[4+Math.floor(pos/2)]); }
+      else if(pos>=4 && pos<6){ nextLaga = DB.laga.find(x=>x.id===order[6]); }
+      if(nextLaga && nextLaga.partai.some(x=>x.winner)){
+        Swal.fire({icon:'warning', title:'Koreksi pemenang partai', text:`Pemenang ${l.ronde} ini berubah dari ${teamNama(pemenangLama)} menjadi ${teamNama(pemenangBaru)||'-'}, padahal laga di ronde berikutnya sudah mulai diisi skornya. Mohon periksa & sesuaikan kembali skor di ronde berikutnya.`, confirmButtonColor:'#E1122F'});
+      }
+      const timLama = DB.teams.find(t=>t.id===pemenangLama); if(timLama) timLama.poin = Math.max(0, timLama.poin-1);
+    }
+    l.pemenangTeam = pemenangBaru;
     if(l.pemenangTeam){
       const winTeam = DB.teams.find(t=>t.id===l.pemenangTeam); if(winTeam) winTeam.poin += 1;
       addLog('Skor', `${l.ronde}: ${teamNama(l.teamA)} vs ${teamNama(l.teamB)} \u2014 pemenang ${teamNama(l.pemenangTeam)}`);
-      advanceBagan(l);
     }
+    advanceBagan(l);
   }
 }
 /* Mode SET 1/2/3 (best of 3 set per partai) */
